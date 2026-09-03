@@ -207,9 +207,9 @@ export async function getTimeline(
   token: string,
   patientRef: string,
 ): Promise<TimelineEventDTO[]> {
-  const data = await ppmsGet<{ events: TimelineEventDTO[] }>(
+  const data = await ppmsGet<{ timeline: TimelineEventDTO[] }>(
     token,
     `/api/v1/patients/${encodeURIComponent(patientRef)}/timeline`,
   );
-  return data.events;
+  return data.timeline;
 }
