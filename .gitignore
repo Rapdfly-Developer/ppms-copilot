@@ -1,0 +1,34 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Next.js build
+.next/
+out/
+
+# Production
+build/
+
+# Env files — NEVER commit real credentials
+.env
+.env.local
+.env.production
+.env.*.local
+
+# TypeScript incremental
+*.tsbuildinfo
+next-env.d.ts
+
+# Testing
+coverage/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
