@@ -151,7 +151,7 @@ export function ResponseArea({
           : "";
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden bg-slate-50">
+    <div className="flex-1 flex flex-col overflow-hidden bg-white">
       {/* Screen reader live region */}
       <div
         role="status"

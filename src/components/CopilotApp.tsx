@@ -23,6 +23,49 @@ import { CAPABILITY_CONFIG } from "@/capabilities";
 import { MAX_TOKEN_LIFETIME_MS } from "@/lib/constants";
 import type { Capability } from "@/types/client";
 
+// ── Status dot ────────────────────────────────────────────────────────────────
+
+function StatusDot({
+  status,
+  isExpired,
+  hasSession,
+}: {
+  status: string;
+  isExpired: boolean;
+  hasSession: boolean;
+}) {
+  const color = isExpired
+    ? "bg-red-400"
+    : !hasSession
+      ? "bg-gray-400"
+      : status === "streaming" || status === "loading"
+        ? "bg-amber-400 animate-pulse"
+        : status === "error"
+          ? "bg-red-400"
+          : "bg-teal-500";
+
+  const label = isExpired
+    ? "Session expired"
+    : !hasSession
+      ? "Awaiting session"
+      : status === "streaming" || status === "loading"
+        ? "Generating"
+        : status === "error"
+          ? "Error"
+          : "Ready";
+
+  return (
+    <div
+      className="flex items-center gap-1.5"
+      role="status"
+      aria-label={`Status: ${label}`}
+    >
+      <span className={`w-2 h-2 rounded-full ${color}`} aria-hidden="true" />
+      <span className="text-xs text-gray-500">{label}</span>
+    </div>
+  );
+}
+
 // ── Header ────────────────────────────────────────────────────────────────────
 
 function Header({
@@ -34,32 +77,12 @@ function Header({
   isExpired: boolean;
   hasSession: boolean;
 }) {
-  const statusColor = isExpired
-    ? "bg-red-400"
-    : !hasSession
-      ? "bg-slate-500"
-      : status === "streaming" || status === "loading"
-        ? "bg-amber-400"
-        : "bg-teal-400";
-
-  const statusLabel = isExpired
-    ? "Session expired"
-    : !hasSession
-      ? "Awaiting session"
-      : status === "streaming" || status === "loading"
-        ? "Generating"
-        : status === "error"
-          ? "Error"
-          : status === "done"
-            ? "Ready"
-            : "Ready";
-
   return (
     <header
-      className="shrink-0 bg-slate-900 px-4 py-3 flex items-center justify-between"
+      className="shrink-0 flex items-center justify-between px-4 py-2.5 border-b border-gray-200 bg-white"
       role="banner"
     >
-      <div className="flex items-center gap-2.5">
+      <div className="flex items-center gap-2">
         <svg
           xmlns="http://www.w3.org/2000/svg"
           viewBox="0 0 24 24"
@@ -68,29 +91,44 @@ function Header({
           strokeWidth={1.5}
           strokeLinecap="round"
           strokeLinejoin="round"
-          className="w-5 h-5 text-teal-400"
+          className="w-4 h-4 text-teal-500 shrink-0"
           aria-hidden="true"
         >
-          <path d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456ZM16.894 20.567 16.5 21.75l-.394-1.183a2.25 2.25 0 0 0-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 0 0 1.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 0 0 1.423 1.423l1.183.394-1.183.394a2.25 2.25 0 0 0-1.423 1.423Z" />
+          <path d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456Z" />
         </svg>
-        <h1 className="text-sm font-semibold text-white tracking-tight">
-          PPMS AI Copilot
-        </h1>
+        <span className="text-sm font-semibold text-gray-800 tracking-tight">
+          AI Clinical Copilot
+        </span>
       </div>
-      <div
-        className="flex items-center gap-1.5"
-        aria-label={`Status: ${statusLabel}`}
-        role="status"
-      >
-        <span
-          className={`w-2 h-2 rounded-full ${statusColor} ${
-            status === "loading" || status === "streaming" ? "animate-pulse" : ""
-          }`}
-          aria-hidden="true"
-        />
-        <span className="text-xs text-slate-400">{statusLabel}</span>
-      </div>
+      <StatusDot status={status} isExpired={isExpired} hasSession={hasSession} />
     </header>
+  );
+}
+
+// ── Context bar ───────────────────────────────────────────────────────────────
+
+function ContextBar({ patientRef, visitId }: { patientRef: string; visitId: string }) {
+  return (
+    <div className="shrink-0 px-4 py-2 bg-gray-50 border-b border-gray-200 flex items-center gap-1.5 text-xs text-gray-500 overflow-hidden">
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        fill="none"
+        viewBox="0 0 24 24"
+        strokeWidth={1.5}
+        stroke="currentColor"
+        className="w-3.5 h-3.5 shrink-0 text-gray-400"
+        aria-hidden="true"
+      >
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z"
+        />
+      </svg>
+      <span className="truncate font-medium text-gray-700">{patientRef}</span>
+      <span className="text-gray-300 shrink-0">·</span>
+      <span className="truncate text-gray-400">current visit</span>
+    </div>
   );
 }
 
@@ -102,14 +140,14 @@ function WaitingForSession() {
       className="flex-1 flex flex-col items-center justify-center text-center p-8"
       aria-label="Waiting for PPMS session"
     >
-      <div className="w-12 h-12 rounded-full bg-slate-800 flex items-center justify-center mb-4">
+      <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center mb-3">
         <svg
           xmlns="http://www.w3.org/2000/svg"
           fill="none"
           viewBox="0 0 24 24"
           strokeWidth={1.5}
           stroke="currentColor"
-          className="w-6 h-6 text-slate-400"
+          className="w-5 h-5 text-gray-400"
           aria-hidden="true"
         >
           <path
@@ -119,12 +157,8 @@ function WaitingForSession() {
           />
         </svg>
       </div>
-      <p className="text-sm font-medium text-slate-300 mb-1">
-        Awaiting patient context
-      </p>
-      <p className="text-xs text-slate-500">
-        Open a patient visit in PPMS to activate the AI Copilot.
-      </p>
+      <p className="text-sm font-medium text-gray-600 mb-1">Awaiting patient context</p>
+      <p className="text-xs text-gray-400">Open a patient visit in PPMS to activate the AI Copilot.</p>
     </main>
   );
 }
@@ -138,14 +172,14 @@ function SessionExpired({ onRefresh }: { onRefresh: () => void }) {
       role="alert"
       aria-label="Session expired"
     >
-      <div className="w-12 h-12 rounded-full bg-red-900/30 flex items-center justify-center mb-4">
+      <div className="w-10 h-10 rounded-full bg-red-50 flex items-center justify-center mb-3">
         <svg
           xmlns="http://www.w3.org/2000/svg"
           fill="none"
           viewBox="0 0 24 24"
           strokeWidth={1.5}
           stroke="currentColor"
-          className="w-6 h-6 text-red-400"
+          className="w-5 h-5 text-red-400"
           aria-hidden="true"
         >
           <path
@@ -155,9 +189,9 @@ function SessionExpired({ onRefresh }: { onRefresh: () => void }) {
           />
         </svg>
       </div>
-      <p className="text-sm font-medium text-slate-300 mb-1">Session expired</p>
-      <p className="text-xs text-slate-500 mb-4">
-        The session token has expired. Return to the patient visit to refresh.
+      <p className="text-sm font-medium text-gray-700 mb-1">Session expired</p>
+      <p className="text-xs text-gray-400 mb-4">
+        Return to the patient visit to refresh your session.
       </p>
       <button
         type="button"
@@ -170,6 +204,17 @@ function SessionExpired({ onRefresh }: { onRefresh: () => void }) {
   );
 }
 
+// ── Footer disclaimer ─────────────────────────────────────────────────────────
+
+function Disclaimer() {
+  return (
+    <p className="shrink-0 text-center text-xs text-teal-600 px-4 py-2 border-t border-gray-100 bg-white leading-snug">
+      The Copilot provides decision support only. It does not diagnose, prescribe, or make
+      treatment decisions, and it never writes to the EMR. All clinical decisions remain yours.
+    </p>
+  );
+}
+
 // ── CopilotApp ────────────────────────────────────────────────────────────────
 
 export default function CopilotApp() {
@@ -179,7 +224,6 @@ export default function CopilotApp() {
   const [draftText, setDraftText] = useState("");
   const [draftConfirmed, setDraftConfirmed] = useState(false);
 
-  // Track session start to detect new sessions without dependency loops.
   const sessionStartedRef = useRef<number | null>(null);
 
   // Auto-start PATIENT_SNAPSHOT when a new session arrives.
@@ -201,7 +245,7 @@ export default function CopilotApp() {
     }
   }, [state.status]);
 
-  // Periodic re-render to detect expiry without polling.
+  // Periodic re-render to detect expiry.
   const [, setTick] = useState(0);
   useEffect(() => {
     if (!session) return;
@@ -242,11 +286,10 @@ export default function CopilotApp() {
     start(activeCapability, session.token);
   }, [session, activeCapability, reset, start]);
 
-  const isStreaming =
-    state.status === "loading" || state.status === "streaming";
+  const isStreaming = state.status === "loading" || state.status === "streaming";
 
   return (
-    <div className="flex flex-col h-screen bg-slate-900 overflow-hidden">
+    <div className="flex flex-col h-screen bg-white overflow-hidden">
       <Header
         status={state.status}
         isExpired={isExpired}
@@ -258,43 +301,41 @@ export default function CopilotApp() {
       ) : isExpired ? (
         <SessionExpired onRefresh={requestTokenRefresh} />
       ) : (
-        <div className="flex flex-1 overflow-hidden">
+        <>
+          <ContextBar patientRef={session.patientRef} visitId={session.visitId} />
+
           <CapabilitySelector
             active={activeCapability}
             onSelect={selectCapability}
             disabled={isStreaming}
           />
 
-          <div className="flex flex-1 flex-col overflow-hidden bg-slate-50">
-            {/* Capability heading */}
-            <div className="shrink-0 px-5 pt-4 pb-3 border-b border-slate-200 bg-white">
-              <h2 className="text-sm font-semibold text-slate-900">
-                {capConfig.label}
-              </h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                {capConfig.description}
-              </p>
-            </div>
-
-            <ResponseArea
-              state={state}
-              isDraft={capConfig.producesDraft}
-              draftText={draftText}
-              onDraftChange={setDraftText}
-              capabilityLabel={capConfig.label}
-            />
-
-            <ActionBar
-              status={state.status}
-              isDraft={capConfig.producesDraft}
-              draftConfirmed={draftConfirmed}
-              text={capConfig.producesDraft && state.status === "done" ? draftText : state.text}
-              onConfirmDraft={handleConfirmDraft}
-              onRegenerate={handleRegenerate}
-              onCancel={cancel}
-            />
+          {/* Capability description */}
+          <div className="shrink-0 px-4 pt-3 pb-2">
+            <h2 className="text-xs font-semibold text-gray-800">{capConfig.label}</h2>
+            <p className="text-xs text-gray-400 mt-0.5">{capConfig.description}</p>
           </div>
-        </div>
+
+          <ResponseArea
+            state={state}
+            isDraft={capConfig.producesDraft}
+            draftText={draftText}
+            onDraftChange={setDraftText}
+            capabilityLabel={capConfig.label}
+          />
+
+          <ActionBar
+            status={state.status}
+            isDraft={capConfig.producesDraft}
+            draftConfirmed={draftConfirmed}
+            text={capConfig.producesDraft && state.status === "done" ? draftText : state.text}
+            onConfirmDraft={handleConfirmDraft}
+            onRegenerate={handleRegenerate}
+            onCancel={cancel}
+          />
+
+          <Disclaimer />
+        </>
       )}
     </div>
   );
