@@ -161,7 +161,7 @@ export class GeminiProvider implements AIProvider {
       clearTimeout(timer);
 
       const finalResponse = await streamResult.response;
-      const thoughtsTokens = (finalResponse.usageMetadata as Record<string, unknown>)?.thoughtsTokenCount as number | undefined;
+      const thoughtsTokens = (finalResponse.usageMetadata as unknown as Record<string, unknown>)?.thoughtsTokenCount as number | undefined;
       const usage: AiUsage = {
         inputTokens: finalResponse.usageMetadata?.promptTokenCount ?? 0,
         outputTokens: finalResponse.usageMetadata?.candidatesTokenCount ?? 0,
@@ -175,7 +175,7 @@ export class GeminiProvider implements AIProvider {
         model: this.model,
         inputTokens: usage.inputTokens,
         outputTokens: usage.outputTokens,
-        thoughtsTokens,
+        ...(thoughtsTokens !== undefined && { thoughtsTokens }),
         durationMs: Date.now() - start,
       });
 
