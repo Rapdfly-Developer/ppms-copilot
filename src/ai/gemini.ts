@@ -15,6 +15,10 @@ import { logger } from "@/lib/logger";
 import type { AIProvider, AiRequest, AiResult, AiStreamEvent, AiUsage } from "./provider";
 import { AiProviderError } from "./provider";
 
+function isThinkingModel(model: string): boolean {
+  return model.includes("2.5") || model.includes("thinking");
+}
+
 const HTTP_ERROR_CODES: Record<number, { code: string; retryable: boolean }> = {
   400: { code: "AI_BAD_REQUEST", retryable: false },
   401: { code: "AI_AUTH_FAILED", retryable: false },
@@ -62,7 +66,8 @@ export class GeminiProvider implements AIProvider {
     }
 
     const start = Date.now();
-    const thinkingBudget = 8192;
+    const thinking = isThinkingModel(this.model);
+    const thinkingBudget = thinking ? 8192 : 0;
     const effectiveMaxTokens = req.maxTokens + thinkingBudget;
     const geminiModel = this.client.getGenerativeModel({
       model: this.model,
@@ -70,7 +75,7 @@ export class GeminiProvider implements AIProvider {
       generationConfig: {
         maxOutputTokens: effectiveMaxTokens,
         temperature: req.temperature ?? 0.3,
-        thinkingConfig: { thinkingBudget },
+        ...(thinking && { thinkingConfig: { thinkingBudget } }),
       } as Record<string, unknown>,
     });
 
@@ -120,12 +125,8 @@ export class GeminiProvider implements AIProvider {
     }
 
     const start = Date.now();
-    // gemini-3.6-flash is a thinking model: maxOutputTokens is shared between
-    // internal reasoning and the final response. The model uses the majority of
-    // the budget for thinking, so we need a much larger total budget.
-    // thinkingBudget: 0 causes 400 for this model (cannot disable thinking).
-    // Instead, cap thinking at 8192 tokens and give the response req.maxTokens.
-    const thinkingBudget = 8192;
+    const thinking = isThinkingModel(this.model);
+    const thinkingBudget = thinking ? 8192 : 0;
     const effectiveMaxTokens = req.maxTokens + thinkingBudget;
     const geminiModel = this.client.getGenerativeModel({
       model: this.model,
@@ -133,7 +134,7 @@ export class GeminiProvider implements AIProvider {
       generationConfig: {
         maxOutputTokens: effectiveMaxTokens,
         temperature: req.temperature ?? 0.3,
-        thinkingConfig: { thinkingBudget },
+        ...(thinking && { thinkingConfig: { thinkingBudget } }),
       } as Record<string, unknown>,
     });
 
