@@ -45,10 +45,13 @@ export function usePostMessage(): UsePostMessageReturn {
   const parentRef = useRef<MessageEventSource | null>(null);
 
   useEffect(() => {
+    let sessionReceived = false;
+
     function handleMessage(event: MessageEvent) {
       const result = validatePpmsInitMessage(event.origin, event.data, PPMS_ORIGIN);
       if (!result.ok) return; // Silently ignore — reveal nothing to potential attackers.
 
+      sessionReceived = true;
       parentRef.current = event.source;
 
       setSession({
@@ -66,12 +69,27 @@ export function usePostMessage(): UsePostMessageReturn {
     window.addEventListener("message", handleMessage);
 
     // Signal to PPMS Core that the message listener is ready.
-    // This resolves the race where PPMS_INIT arrives before React hydration.
-    if (PPMS_ORIGIN) {
-      window.parent.postMessage({ type: "PLUGIN_MOUNTED", pluginId: PLUGIN_ID }, PPMS_ORIGIN);
+    // Retry every 1.5 s until PPMS_INIT arrives — resolves the race where
+    // PPMS Core's onMounted listener hasn't registered yet when the first
+    // PLUGIN_MOUNTED fires (can happen during PPMS page hydration).
+    function sendMounted() {
+      if (PPMS_ORIGIN) {
+        window.parent.postMessage({ type: "PLUGIN_MOUNTED", pluginId: PLUGIN_ID }, PPMS_ORIGIN);
+      }
     }
+    sendMounted();
+    const retryInterval = setInterval(() => {
+      if (sessionReceived) {
+        clearInterval(retryInterval);
+        return;
+      }
+      sendMounted();
+    }, 1500);
 
-    return () => window.removeEventListener("message", handleMessage);
+    return () => {
+      window.removeEventListener("message", handleMessage);
+      clearInterval(retryInterval);
+    };
   }, []); // Runs once — PPMS_ORIGIN is stable.
 
   function postToParent(msg: object, source?: MessageEventSource | null): void {
