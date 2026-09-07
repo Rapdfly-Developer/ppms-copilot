@@ -5,7 +5,7 @@ import type { NextConfig } from "next";
 const PPMS_ORIGIN = process.env.NEXT_PUBLIC_PPMS_ORIGIN ?? "https://ppmsai.com";
 
 const nextConfig: NextConfig = {
-  serverExternalPackages: ["@anthropic-ai/sdk"],
+  serverExternalPackages: ["@anthropic-ai/sdk", "@google/generative-ai"],
   async headers() {
     const csp = [
       "default-src 'self'",
