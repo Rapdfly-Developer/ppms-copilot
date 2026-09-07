@@ -1,9 +1,11 @@
 // Provider factory — lazy singleton for production, replaceable in tests.
 //
-// Usage in production: createProvider() returns the AnthropicProvider instance.
+// Usage in production: createProvider() reads AI_PROVIDER env var to select
+//   "gemini" → GeminiProvider, anything else → AnthropicProvider (default).
 // Usage in tests: call setProvider(mockProvider) to inject a test double.
 
 import { AnthropicProvider } from "./anthropic";
+import { GeminiProvider } from "./gemini";
 import type { AIProvider } from "./provider";
 
 export type { AIProvider, AiRequest, AiResult, AiStreamEvent, AiUsage, AiMessage } from "./provider";
@@ -13,7 +15,8 @@ let _provider: AIProvider | null = null;
 
 export function createProvider(): AIProvider {
   if (!_provider) {
-    _provider = new AnthropicProvider();
+    const name = process.env.AI_PROVIDER?.trim().toLowerCase();
+    _provider = name === "gemini" ? new GeminiProvider() : new AnthropicProvider();
   }
   return _provider;
 }

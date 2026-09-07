@@ -64,6 +64,13 @@ export function usePostMessage(): UsePostMessageReturn {
     }
 
     window.addEventListener("message", handleMessage);
+
+    // Signal to PPMS Core that the message listener is ready.
+    // This resolves the race where PPMS_INIT arrives before React hydration.
+    if (PPMS_ORIGIN) {
+      window.parent.postMessage({ type: "PLUGIN_MOUNTED", pluginId: PLUGIN_ID }, PPMS_ORIGIN);
+    }
+
     return () => window.removeEventListener("message", handleMessage);
   }, []); // Runs once — PPMS_ORIGIN is stable.
 
