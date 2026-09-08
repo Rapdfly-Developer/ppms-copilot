@@ -23,6 +23,7 @@ const HTTP_ERROR_CODES: Record<number, { code: string; retryable: boolean }> = {
   400: { code: "AI_UNAVAILABLE", retryable: false },
   401: { code: "AI_AUTH_FAILED", retryable: false },
   403: { code: "AI_AUTH_FAILED", retryable: false },
+  404: { code: "AI_NOT_CONFIGURED", retryable: false },
   429: { code: "AI_RATE_LIMITED", retryable: true },
   500: { code: "AI_UNAVAILABLE", retryable: true },
   503: { code: "AI_UNAVAILABLE", retryable: true },
@@ -196,8 +197,9 @@ export class GeminiProvider implements AIProvider {
       return { code: "AI_TIMEOUT", retryable: true };
     }
     if (err instanceof GoogleGenerativeAIFetchError) {
+      logger.error("gemini_http_error", { status: err.status, statusText: err.statusText });
       return (err.status !== undefined && HTTP_ERROR_CODES[err.status]) ||
-        { code: "AI_PROVIDER_ERROR", retryable: false };
+        { code: "AI_UNAVAILABLE", retryable: false };
     }
     if (err instanceof GoogleGenerativeAIError) {
       const msg = err.message?.toLowerCase() ?? "";
