@@ -50,7 +50,7 @@ export function getPpmsCoreUrl(): string {
 
 export function getAiModel(): string {
   if (process.env.AI_MODEL?.trim()) return process.env.AI_MODEL.trim();
-  return getAiProvider() === "gemini" ? "gemini-3.6-flash" : "claude-opus-5";
+  return getAiProvider() === "gemini" ? "gemini-2.0-flash" : "claude-opus-5";
 }
 
 export function getAiTimeoutMs(): number {
