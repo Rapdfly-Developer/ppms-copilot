@@ -31,6 +31,7 @@ export type SafeLogContext = {
   timelineEventsIncluded?: number;
   estimatedTokens?: number;
   warningCount?: number;
+  reason?: string;
 };
 
 function emit(level: LogLevel, event: string, ctx?: SafeLogContext): void {
