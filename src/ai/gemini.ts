@@ -20,11 +20,11 @@ function isThinkingModel(model: string): boolean {
 }
 
 const HTTP_ERROR_CODES: Record<number, { code: string; retryable: boolean }> = {
-  400: { code: "AI_BAD_REQUEST", retryable: false },
+  400: { code: "AI_UNAVAILABLE", retryable: false },
   401: { code: "AI_AUTH_FAILED", retryable: false },
-  403: { code: "AI_FORBIDDEN", retryable: false },
+  403: { code: "AI_AUTH_FAILED", retryable: false },
   429: { code: "AI_RATE_LIMITED", retryable: true },
-  500: { code: "AI_SERVER_ERROR", retryable: true },
+  500: { code: "AI_UNAVAILABLE", retryable: true },
   503: { code: "AI_UNAVAILABLE", retryable: true },
 };
 
@@ -208,7 +208,7 @@ export class GeminiProvider implements AIProvider {
         return { code: "AI_UNAVAILABLE", retryable: true };
       }
     }
-    return { code: "AI_PROVIDER_ERROR", retryable: false };
+    return { code: "AI_UNAVAILABLE", retryable: false };
   }
 
   private handleError(err: unknown, start: number): never {
