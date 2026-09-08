@@ -197,7 +197,7 @@ export class GeminiProvider implements AIProvider {
       return { code: "AI_TIMEOUT", retryable: true };
     }
     if (err instanceof GoogleGenerativeAIFetchError) {
-      logger.error("gemini_http_error", { status: err.status, statusText: err.statusText });
+      logger.error("gemini_http_error", { status: err.status });
       return (err.status !== undefined && HTTP_ERROR_CODES[err.status]) ||
         { code: "AI_UNAVAILABLE", retryable: false };
     }
