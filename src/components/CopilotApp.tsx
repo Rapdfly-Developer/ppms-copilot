@@ -219,7 +219,7 @@ function Disclaimer() {
 
 export default function CopilotApp() {
   const { session, confirmDraft, requestTokenRefresh } = usePostMessage();
-  const { state, start, cancel, reset } = useCopilotStream();
+  const { state, start, cancel, reset, clearCache, deleteCacheEntry } = useCopilotStream();
   const [activeCapability, setActiveCapability] = useState<Capability>("PATIENT_SNAPSHOT");
   const [draftText, setDraftText] = useState("");
   const [draftConfirmed, setDraftConfirmed] = useState(false);
@@ -232,11 +232,13 @@ export default function CopilotApp() {
     if (session.initiatedAt === sessionStartedRef.current) return;
     sessionStartedRef.current = session.initiatedAt;
 
+    // New visit → clear cached responses from the previous visit.
+    clearCache();
     setActiveCapability("PATIENT_SNAPSHOT");
     setDraftText("");
     setDraftConfirmed(false);
-    start("PATIENT_SNAPSHOT", session.token);
-  }, [session?.initiatedAt, start]);
+    start("PATIENT_SNAPSHOT", session.token, undefined, `${session.visitId}:PATIENT_SNAPSHOT`);
+  }, [session?.initiatedAt, start, clearCache]);
 
   // Sync draft text when streaming completes for a draft capability.
   useEffect(() => {
@@ -265,7 +267,8 @@ export default function CopilotApp() {
       setActiveCapability(cap);
       setDraftText("");
       setDraftConfirmed(false);
-      start(cap, session.token);
+      // Pass a cache key so already-fetched tabs are served instantly.
+      start(cap, session.token, undefined, `${session.visitId}:${cap}`);
     },
     [session, state.status, cancel, start],
   );
@@ -282,9 +285,11 @@ export default function CopilotApp() {
     if (!session) return;
     setDraftText("");
     setDraftConfirmed(false);
+    const cacheKey = `${session.visitId}:${activeCapability}`;
+    deleteCacheEntry(cacheKey);
     reset();
-    start(activeCapability, session.token);
-  }, [session, activeCapability, reset, start]);
+    start(activeCapability, session.token, undefined, cacheKey);
+  }, [session, activeCapability, reset, start, deleteCacheEntry]);
 
   const isStreaming = state.status === "loading" || state.status === "streaming";
 
