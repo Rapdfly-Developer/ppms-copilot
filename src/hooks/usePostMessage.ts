@@ -54,11 +54,19 @@ export function usePostMessage(): UsePostMessageReturn {
       sessionReceived = true;
       parentRef.current = event.source;
 
-      setSession({
-        token: result.message.token,
-        visitId: result.message.visitId,
-        patientRef: result.message.patientRef,
-        initiatedAt: Date.now(),
+      // Only create a new session (and trigger auto-start) when the visit changes.
+      // Repeated PPMS_INIT for the same visit (e.g. from the PLUGIN_MOUNTED retry
+      // loop) must not re-fire auto-start and burn another AI call.
+      setSession((prev) => {
+        if (prev?.visitId === result.message.visitId && prev?.patientRef === result.message.patientRef) {
+          return prev;
+        }
+        return {
+          token: result.message.token,
+          visitId: result.message.visitId,
+          patientRef: result.message.patientRef,
+          initiatedAt: Date.now(),
+        };
       });
 
       // Acknowledge with PLUGIN_READY.

@@ -151,13 +151,13 @@ describe("AIProvider abstraction", () => {
       expect(createProvider()).toBe(mock2);
     });
 
-    it("resetProvider causes next createProvider to build AnthropicProvider", () => {
+    it("resetProvider causes next createProvider to build the default GroqProvider", () => {
       setProvider(new MockProvider());
       resetProvider();
-      // After reset, createProvider creates AnthropicProvider
+      // After reset, createProvider creates GroqProvider (default)
       // We can only verify it's not the mock
       const provider = createProvider();
-      expect(provider.id).toBe("anthropic");
+      expect(provider.id).toBe("groq");
     });
   });
 });

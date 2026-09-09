@@ -16,30 +16,30 @@ function requireEnv(name: string): string {
   return val.trim();
 }
 
-// Which AI provider is active — "gemini" or "anthropic" (default).
-export function getAiProvider(): "gemini" | "anthropic" {
-  return process.env.AI_PROVIDER?.trim().toLowerCase() === "gemini"
-    ? "gemini"
-    : "anthropic";
+// Which AI provider is active — "groq" (default), "anthropic" (legacy).
+export function getAiProvider(): "groq" | "anthropic" {
+  const val = process.env.AI_PROVIDER?.trim().toLowerCase();
+  if (val === "anthropic") return "anthropic";
+  return "groq"; // default
 }
 
 // Lazy-validate once per cold start per env var — used by the route module.
 export function assertServerEnv(): void {
-  if (getAiProvider() === "gemini") {
-    requireEnv("GEMINI_API_KEY");
-  } else {
+  if (getAiProvider() === "anthropic") {
     requireEnv("ANTHROPIC_API_KEY");
+  } else {
+    requireEnv("GROQ_API_KEY");
   }
   requireEnv("PPMS_CORE_URL");
 }
 
 // Accessors used by individual modules — each throws on first use if unset.
-export function getAnthropicApiKey(): string {
-  return requireEnv("ANTHROPIC_API_KEY");
+export function getGroqApiKey(): string {
+  return requireEnv("GROQ_API_KEY");
 }
 
-export function getGeminiApiKey(): string {
-  return requireEnv("GEMINI_API_KEY");
+export function getAnthropicApiKey(): string {
+  return requireEnv("ANTHROPIC_API_KEY");
 }
 
 export function getPpmsCoreUrl(): string {
@@ -50,7 +50,7 @@ export function getPpmsCoreUrl(): string {
 
 export function getAiModel(): string {
   if (process.env.AI_MODEL?.trim()) return process.env.AI_MODEL.trim();
-  return getAiProvider() === "gemini" ? "gemini-3.6-flash" : "claude-opus-5";
+  return getAiProvider() === "anthropic" ? "claude-opus-5" : "openai/gpt-oss-20b";
 }
 
 export function getAiTimeoutMs(): number {

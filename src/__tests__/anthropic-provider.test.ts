@@ -31,8 +31,9 @@ describe("AnthropicProvider", () => {
       expect(provider.model).toBe("claude-sonnet-5");
     });
 
-    it("defaults model to claude-opus-5 when AI_MODEL is not set", () => {
+    it("defaults model to claude-opus-5 when AI_MODEL is not set and provider is anthropic", () => {
       vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-test");
+      vi.stubEnv("AI_PROVIDER", "anthropic");
       delete process.env.AI_MODEL;
       const provider = new AnthropicProvider();
       expect(provider.model).toBe("claude-opus-5");

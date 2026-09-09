@@ -4,8 +4,8 @@
 // context from PPMS Core, calls the AI provider, validates the response, and
 // returns an NDJSON stream of frames.
 //
-// Runtime: Node.js — required because @anthropic-ai/sdk uses Node.js streams.
-// Do NOT change to "edge" — the Anthropic SDK does not support the Edge runtime.
+// Runtime: Node.js — the openai SDK (used for Groq) relies on Node.js streams.
+// Do NOT change to "edge".
 
 export const runtime = "nodejs";
 

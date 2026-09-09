@@ -99,6 +99,21 @@ describe("Security boundaries", () => {
     });
   });
 
+  describe("GROQ_API_KEY is server-side only", () => {
+    it("getGroqApiKey() reads from process.env (server), not from a browser-visible source", async () => {
+      vi.stubEnv("GROQ_API_KEY", "gsk-server-only");
+      const { getGroqApiKey } = await import("@/lib/env");
+      expect(getGroqApiKey()).toBe("gsk-server-only");
+    });
+
+    it("env.ts does not export GROQ_API_KEY as a public constant", async () => {
+      const envModule = await import("@/lib/env");
+      const exportedKeys = Object.keys(envModule);
+      expect(exportedKeys).not.toContain("GROQ_API_KEY");
+      expect(exportedKeys).toContain("getGroqApiKey");
+    });
+  });
+
   describe("Request body fields are typed — no extra fields leak into pipeline", () => {
     it("CopilotRequest from parseRequest only contains expected fields", () => {
       const result = parseRequest(
