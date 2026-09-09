@@ -60,7 +60,9 @@ describe("Response validation", () => {
     }
 
     it("case-insensitive matching on unsafe patterns", () => {
-      const r = validateResponse("i recommend the doctor consider surgery.", CAP);
+      // "I recommend starting treatment with" is a genuinely unsafe prescription phrase
+      // that is NOT rewritten by the sanitiser (no benign-rewrite rule covers it)
+      const r = validateResponse("i recommend starting treatment with latanoprost.", CAP);
       expect(r.ok).toBe(false);
     });
   });

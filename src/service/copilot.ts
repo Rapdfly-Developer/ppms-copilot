@@ -15,7 +15,7 @@
 import { parseRequest } from "@/schemas/request";
 import { buildPatientContext } from "@/context/builder";
 import { buildSystemPrompt, buildUserMessage } from "@/prompts";
-import { validateResponse } from "@/validation/response";
+import { validateResponse, sanitiseResponse } from "@/validation/response";
 import { createProvider } from "@/ai";
 import { CAPABILITY_CONFIG } from "@/capabilities";
 import { CopilotError, USER_MESSAGES, type ErrorCode } from "@/lib/errors";
