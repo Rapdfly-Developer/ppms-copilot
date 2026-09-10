@@ -66,12 +66,14 @@ export class GroqProvider implements AIProvider {
       throw new AiProviderError("AI_NOT_CONFIGURED", "Groq API key not set");
     }
 
+    const model = req.modelOverride ?? this.model;
+    const temperature = req.reasoningEffort === "high" ? 0.1 : (req.temperature ?? 0.3);
     const start = Date.now();
     try {
       const response = await this.client.chat.completions.create({
-        model: this.model,
+        model,
         max_tokens: req.maxTokens,
-        temperature: req.temperature ?? 0.3,
+        temperature,
         messages: [
           { role: "system", content: req.systemPrompt },
           ...req.messages.map((m) => ({ role: m.role, content: m.content })),
@@ -89,13 +91,13 @@ export class GroqProvider implements AIProvider {
 
       logger.info("ai_complete_success", {
         provider: this.id,
-        model: this.model,
+        model,
         inputTokens:  usage.inputTokens,
         outputTokens: usage.outputTokens,
         durationMs: Date.now() - start,
       });
 
-      return { text, model: this.model, provider: this.id, usage, stopReason };
+      return { text, model, provider: this.id, usage, stopReason };
     } catch (err) {
       this.handleError(err, start);
     }
@@ -107,6 +109,8 @@ export class GroqProvider implements AIProvider {
       return;
     }
 
+    const model = req.modelOverride ?? this.model;
+    const temperature = req.reasoningEffort === "high" ? 0.1 : (req.temperature ?? 0.3);
     const start = Date.now();
     let inputTokens  = 0;
     let outputTokens = 0;
@@ -114,9 +118,9 @@ export class GroqProvider implements AIProvider {
 
     try {
       const streamResponse = await this.client.chat.completions.create({
-        model: this.model,
+        model,
         max_tokens: req.maxTokens,
-        temperature: req.temperature ?? 0.3,
+        temperature,
         messages: [
           { role: "system", content: req.systemPrompt },
           ...req.messages.map((m) => ({ role: m.role, content: m.content })),
@@ -145,7 +149,7 @@ export class GroqProvider implements AIProvider {
 
       logger.info("ai_stream_success", {
         provider: this.id,
-        model: this.model,
+        model,
         inputTokens,
         outputTokens,
         durationMs: Date.now() - start,
@@ -153,7 +157,7 @@ export class GroqProvider implements AIProvider {
 
       yield {
         type: "done",
-        model: this.model,
+        model,
         provider: this.id,
         usage: { inputTokens, outputTokens },
         stopReason,

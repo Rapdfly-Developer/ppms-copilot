@@ -5,9 +5,10 @@
 //   2. Build patient context (calls PPMS Core APIs)
 //   3. Build prompt
 //   4. Check AI provider is configured
-//   5. Stream AI response
-//   6. Validate accumulated response
-//   7. Emit NDJSON frames
+//   5. Select model tier (fast vs reasoning) based on capability config
+//   6. Stream AI response
+//   7. Validate accumulated response
+//   8. Emit NDJSON frames
 //
 // Security: patientRef and visitId come from the decoded token, never from the
 // request body. The AI provider key is server-side only.
@@ -15,11 +16,12 @@
 import { parseRequest } from "@/schemas/request";
 import { buildPatientContext } from "@/context/builder";
 import { buildSystemPrompt, buildUserMessage } from "@/prompts";
-import { validateResponse, sanitiseResponse } from "@/validation/response";
+import { validateResponse } from "@/validation/response";
 import { createProvider } from "@/ai";
 import { CAPABILITY_CONFIG } from "@/capabilities";
 import { CopilotError, USER_MESSAGES, type ErrorCode } from "@/lib/errors";
 import { logger } from "@/lib/logger";
+import { getCopilotFastModel, getCopilotReasoningModel } from "@/lib/env";
 
 // ── NDJSON frame types ────────────────────────────────────────────────────────
 
@@ -35,6 +37,8 @@ export async function* streamCopilotResponse(
   body: unknown,
   authorizationHeader: string | null,
 ): AsyncIterable<NdjsonFrame> {
+  const pipelineStart = Date.now();
+
   // 1. Parse & validate
   const parsed = parseRequest(body, authorizationHeader);
   if (!parsed.ok) {
@@ -44,6 +48,12 @@ export async function* streamCopilotResponse(
 
   const { token, capability, patientRef, visitId, question } = parsed.data;
   const capConfig = CAPABILITY_CONFIG[capability];
+
+  // 5. Select model tier based on capability configuration
+  const modelOverride =
+    capConfig.modelTier === "reasoning"
+      ? getCopilotReasoningModel()
+      : getCopilotFastModel();
 
   // 2. Build patient context (fetches from PPMS Core /api/v1/* endpoints)
   let context: Awaited<ReturnType<typeof buildPatientContext>>;
@@ -69,7 +79,18 @@ export async function* streamCopilotResponse(
     return;
   }
 
-  // 5. Stream AI response
+  // Log request start with observability fields
+  logger.info("pipeline_request_start", {
+    capability,
+    model: modelOverride,
+    modelTier: capConfig.modelTier,
+    reasoningEffort: capConfig.reasoningEffort,
+    maxTokens: capConfig.maxTokens,
+    estimatedTokens: context.stats.estimatedTokens,
+    visitsIncluded: context.stats.visitsIncluded,
+  });
+
+  // 6. Stream AI response
   let accumulatedText = "";
   let streamDone = false;
   let doneMeta: Record<string, unknown> = {};
@@ -79,7 +100,8 @@ export async function* streamCopilotResponse(
       systemPrompt,
       messages: [{ role: "user", content: userMessage }],
       maxTokens: capConfig.maxTokens,
-      temperature: 0.3,
+      reasoningEffort: capConfig.reasoningEffort,
+      modelOverride,
     })) {
       if (event.type === "text") {
         accumulatedText += event.text;
@@ -110,32 +132,55 @@ export async function* streamCopilotResponse(
     return;
   }
 
-  // 6. Validate accumulated response
+  // 7. Validate accumulated response
   const validation = validateResponse(
     accumulatedText,
     capability,
     doneMeta.stopReason as string | undefined,
   );
 
+  const safetyResult = !validation.ok
+    ? validation.code
+    : validation.warnings.length > 0
+    ? "warning"
+    : "ok";
+
+  const latencyMs = Date.now() - pipelineStart;
+
   if (!validation.ok) {
-    logger.warn("pipeline_validation_failed", { capability, code: validation.code });
+    logger.warn("pipeline_validation_failed", {
+      capability,
+      code: validation.code,
+      safetyResult,
+      latencyMs,
+    });
     yield errorFrame(validation.code, "RESPONSE_VALIDATION_FAILED");
     return;
   }
 
-  // 7. Emit warnings (if any)
+  // 8. Emit warnings (if any)
   if (validation.warnings.length > 0) {
-    logger.info("pipeline_warnings", { capability, warningCount: validation.warnings.length });
+    logger.info("pipeline_warnings", {
+      capability,
+      warningCount: validation.warnings.length,
+      safetyResult,
+    });
     yield { type: "warning", warnings: validation.warnings };
   }
 
-  // 8. Done
+  // Log pipeline completion with full observability
   logger.info("pipeline_complete", {
     capability,
+    model: doneMeta.model as string,
+    provider: doneMeta.provider as string,
+    modelTier: capConfig.modelTier,
+    reasoningEffort: capConfig.reasoningEffort,
     inputTokens: doneMeta.inputTokens as number,
     outputTokens: doneMeta.outputTokens as number,
     visitsIncluded: context.stats.visitsIncluded,
     estimatedTokens: context.stats.estimatedTokens,
+    safetyResult,
+    latencyMs,
   });
 
   yield {
@@ -143,9 +188,12 @@ export async function* streamCopilotResponse(
     meta: {
       ...doneMeta,
       capability,
+      modelTier: capConfig.modelTier,
+      reasoningEffort: capConfig.reasoningEffort,
       producesDraft: capConfig.producesDraft,
       draftType: capConfig.draftType,
       contextStats: context.stats,
+      latencyMs,
     },
   };
 }

@@ -59,3 +59,15 @@ export function getAiTimeoutMs(): number {
   const parsed = parseInt(raw, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 60_000;
 }
+
+// Per-tier model selection — used by the service layer to route capabilities.
+// COPILOT_FAST_MODEL: quick summaries (snapshot, prev visits, timeline).
+// COPILOT_REASONING_MODEL: deep longitudinal analysis (attention, draft note, follow-up).
+// Both fall back to AI_MODEL (then to the provider default) when not set.
+export function getCopilotFastModel(): string {
+  return process.env.COPILOT_FAST_MODEL?.trim() || getAiModel();
+}
+
+export function getCopilotReasoningModel(): string {
+  return process.env.COPILOT_REASONING_MODEL?.trim() || getAiModel();
+}

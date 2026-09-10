@@ -3,6 +3,17 @@
 // Fetches the minimal data each capability declares, then renders it into
 // a deterministic plain-text block that gets sent to the AI model.
 //
+// Sections produced (capability-dependent):
+//   PATIENT — demographics (PII-safe)
+//   CURRENT VISIT — full structured current visit
+//   PREVIOUS VISITS — structured previous visit records
+//   MEDICATION HISTORY — aggregated across all visits
+//   INVESTIGATION HISTORY — unique tests ordered across visits
+//   FOLLOW-UP HISTORY — follow-up dates and advice across visits
+//   CLINICAL EVIDENCE — pre-computed medication/diagnosis changes
+//   CLINICAL TIMELINE — event timeline
+//   APPOINTMENTS — upcoming appointments
+//
 // Identity invariant: patient name, UDID, doctorId, and hospitalId must
 // NEVER appear in the output text. The builder refers to the patient as
 // "the patient" throughout. The toSafePatientSummary() call is the
@@ -21,6 +32,7 @@ import {
   type VisitDTO,
 } from "@/lib/ppms-client";
 import { toSafePatientSummary, estimateTokens } from "./pii";
+import { extractClinicalEvidence, renderClinicalEvidence } from "./evidence";
 import type { PatientContext, BuildContextArgs, FetchedContext } from "./types";
 
 // ── Data fetcher ──────────────────────────────────────────────────────────────
@@ -35,25 +47,20 @@ async function fetchContext(
 
   const [patient, currentVisit, visitHistory, appointments, timeline] =
     await Promise.all([
-      // Demographics always fetched (lightweight, required by all capabilities)
       getPatient(token, patientRef),
 
-      // Current visit — only when the capability declares it
       includes.currentVisit
         ? getVisit(token, patientRef, visitId)
         : Promise.resolve(undefined),
 
-      // Visit history — only when declared; limit 0 means fetch 20 (max)
       includes.visitHistory
         ? getVisits(token, patientRef, visitLimit === 0 ? 20 : visitLimit)
         : Promise.resolve([] as VisitDTO[]),
 
-      // Appointments — only when declared
       includes.appointments
         ? getAppointments(token, patientRef, 10)
         : Promise.resolve([]),
 
-      // Timeline — only when declared
       includes.timeline
         ? getTimeline(token, patientRef)
         : Promise.resolve([]),
@@ -157,26 +164,44 @@ export async function buildPatientContext(
     throw err;
   }
 
-  // Render — identity fields intentionally excluded
   const safe = toSafePatientSummary(fetched.patient);
   const sections: string[] = [];
 
-  sections.push("=== PATIENT DEMOGRAPHICS ===");
+  // ── PATIENT ───────────────────────────────────────────────────────────────
+  sections.push("=== PATIENT ===");
   sections.push(renderDemographics(safe));
 
+  // ── CURRENT VISIT ─────────────────────────────────────────────────────────
   if (fetched.currentVisit) {
     sections.push("\n=== CURRENT VISIT ===");
     sections.push(renderVisit(fetched.currentVisit, "Current visit"));
   }
 
+  // ── PREVIOUS VISITS ───────────────────────────────────────────────────────
   const previousVisits = fetched.visitHistory.filter((v) => v.visitId !== visitId);
   if (previousVisits.length > 0) {
-    sections.push("\n=== VISIT HISTORY (newest first) ===");
+    sections.push("\n=== PREVIOUS VISITS (newest first) ===");
     previousVisits.forEach((v, i) => {
       sections.push(renderVisit(v, `Visit ${i + 1}`));
     });
   }
 
+  // ── CLINICAL EVIDENCE (pre-computed) ──────────────────────────────────────
+  // Build evidence from all visits combined (current + previous), newest-first
+  const allVisitsForEvidence: VisitDTO[] = [
+    ...(fetched.currentVisit ? [fetched.currentVisit] : []),
+    ...previousVisits,
+  ];
+  if (allVisitsForEvidence.length >= 1) {
+    const evidence = extractClinicalEvidence(allVisitsForEvidence);
+    const evidenceText = renderClinicalEvidence(evidence);
+    if (evidenceText.trim()) {
+      sections.push("\n=== CLINICAL EVIDENCE (pre-computed from structured record) ===");
+      sections.push(evidenceText);
+    }
+  }
+
+  // ── CLINICAL TIMELINE ─────────────────────────────────────────────────────
   if (fetched.timeline.length > 0) {
     sections.push("\n=== CLINICAL TIMELINE ===");
     for (const event of fetched.timeline) {
@@ -185,6 +210,7 @@ export async function buildPatientContext(
     }
   }
 
+  // ── APPOINTMENTS ──────────────────────────────────────────────────────────
   if (fetched.appointments.length > 0) {
     sections.push("\n=== APPOINTMENTS ===");
     for (const appt of fetched.appointments) {

@@ -14,6 +14,8 @@ export type AiRequest = {
   messages: AiMessage[];
   maxTokens: number;
   temperature?: number; // defaults to 0.3 in each provider
+  reasoningEffort?: "medium" | "high"; // high → lower temp, potentially different model
+  modelOverride?: string; // use a specific model for this request instead of provider default
 };
 
 export type AiUsage = {

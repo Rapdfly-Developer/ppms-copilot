@@ -34,3 +34,36 @@ export type BuildContextArgs = {
   visitId: string;      // comes from the decoded plugin token
   question?: string;    // optional doctor question (QUESTION capability)
 };
+
+// ── Clinical evidence layer ──────────────────────────────────────────────────
+// Pre-computed from structured DTO data before sending to the AI.
+// This surfaces objective clinical signals without requiring the LLM to derive them.
+
+export type MedicationDelta = {
+  drugName: string;
+  change: "added" | "removed" | "continued";
+  visitDate: string;
+  previousVisitDate?: string;
+};
+
+export type DiagnosisDelta = {
+  description: string;
+  change: "new" | "confirmed" | "resolved" | "unchanged";
+  laterality?: string;
+  visitDate: string;
+};
+
+export type ClinicalEvidence = {
+  // Medication changes between consecutive visits
+  medicationDeltas: MedicationDelta[];
+  // Diagnosis status changes across visits
+  diagnosisDeltas: DiagnosisDelta[];
+  // All unique medications ever documented (for full medication history)
+  uniqueMedications: string[];
+  // All unique investigations ordered across visits
+  uniqueInvestigations: string[];
+  // Surgeries documented across visits
+  surgeryHistory: Array<{ name: string; visitDate: string }>;
+  // Follow-up dates documented across visits
+  followUpHistory: Array<{ date: string; visitDate: string; advice?: string }>;
+};
