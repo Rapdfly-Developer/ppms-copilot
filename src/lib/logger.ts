@@ -38,6 +38,7 @@ export type SafeLogContext = {
   cacheHit?: boolean;         // true when response served from in-memory cache
   safetyResult?: string;      // "ok" | "unsafe" | "warning" | "truncated" | "empty"
   latencyMs?: number;         // total pipeline latency including context fetch + AI call
+  delayMs?: number;           // retry backoff delay (rate-limit retries)
 };
 
 function emit(level: LogLevel, event: string, ctx?: SafeLogContext): void {

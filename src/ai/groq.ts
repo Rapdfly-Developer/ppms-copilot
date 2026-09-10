@@ -112,23 +112,51 @@ export class GroqProvider implements AIProvider {
     const model = req.modelOverride ?? this.model;
     const temperature = req.reasoningEffort === "high" ? 0.1 : (req.temperature ?? 0.3);
     const start = Date.now();
+
+    // Retry on 429 (rate limit) before any frames are yielded.
+    // Groq 429s always come at connection time, never mid-stream.
+    const RETRY_DELAYS_MS = [3000, 6000];
+    let streamResponse: Awaited<ReturnType<typeof this.client.chat.completions.create>> | null = null;
+
+    for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
+      try {
+        streamResponse = await this.client.chat.completions.create({
+          model,
+          max_tokens: req.maxTokens,
+          temperature,
+          messages: [
+            { role: "system", content: req.systemPrompt },
+            ...req.messages.map((m) => ({ role: m.role, content: m.content })),
+          ],
+          stream: true,
+          stream_options: { include_usage: true },
+        });
+        break; // connection established — proceed to iterate
+      } catch (err) {
+        const { code } = this.classifyError(err);
+        if (code === "AI_RATE_LIMITED" && attempt < RETRY_DELAYS_MS.length) {
+          const delayMs = RETRY_DELAYS_MS[attempt];
+          logger.info("groq_rate_limit_retry", { delayMs, model });
+          await new Promise((r) => setTimeout(r, delayMs));
+          continue;
+        }
+        // Non-retryable or retries exhausted
+        logger.error("ai_stream_error", { code, durationMs: Date.now() - start });
+        yield { type: "error", code, message: "AI stream failed" };
+        return;
+      }
+    }
+
+    if (!streamResponse) {
+      yield { type: "error", code: "AI_UNAVAILABLE", message: "AI stream failed" };
+      return;
+    }
+
     let inputTokens  = 0;
     let outputTokens = 0;
     let stopReason   = "end_turn";
 
     try {
-      const streamResponse = await this.client.chat.completions.create({
-        model,
-        max_tokens: req.maxTokens,
-        temperature,
-        messages: [
-          { role: "system", content: req.systemPrompt },
-          ...req.messages.map((m) => ({ role: m.role, content: m.content })),
-        ],
-        stream: true,
-        stream_options: { include_usage: true },
-      });
-
       for await (const chunk of streamResponse) {
         const delta = chunk.choices[0]?.delta?.content;
         if (delta) {
