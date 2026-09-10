@@ -50,6 +50,17 @@ const SANITISE_RULES: { pattern: RegExp; replacement: string }[] = [
     pattern: /\bI recommend\s+confirming\b/gi,
     replacement: "The record suggests confirming",
   },
+  // "I suggest …"  →  "The record suggests …"
+  // Benign summarisation phrase — "I suggest the doctor review" is documentary, not prescriptive.
+  {
+    pattern: /\bI suggest\b/gi,
+    replacement: "The record suggests",
+  },
+  // "I advise …"  →  "The record advises …"
+  {
+    pattern: /\bI advise\b/gi,
+    replacement: "The record advises",
+  },
 ];
 
 /**

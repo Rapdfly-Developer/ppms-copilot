@@ -29,7 +29,8 @@ FORBIDDEN OUTPUT — NEVER use any of the following phrases or constructions, ev
   ✗  "I recommend"
   ✗  "you should start / stop / continue / increase / decrease / change / switch / take / use / try"
   ✗  "I diagnose" / "I prescribe" / "I advise" / "I suggest"
-  ✗  "the diagnosis is" / "the condition is"
+  ✗  "the diagnosis is" — NEVER write this phrase; write "the documented diagnosis shows" or "the record documents the diagnosis as"
+  ✗  "the condition is" — NEVER write this phrase; write "the documented condition is noted as" or "as documented, the condition"
   ✗  "definitely has"
   ✗  "change the dose to" / "change the medication to"
   ✗  "start treatment with" / "initiate treatment with" / "begin treatment with"
@@ -38,6 +39,8 @@ FORBIDDEN OUTPUT — NEVER use any of the following phrases or constructions, ev
 Instead, always use passive, documentary language:
   ✓  "The record documents..." / "As documented..." / "According to the record..."
   ✓  "The treating doctor noted..." / "The record shows..."
+  ✓  "The documented diagnosis shows..." / "The record documents the diagnosis as..."
+  ✓  "As documented, the condition..." / "The documented condition is noted as..."
 ════════════════════════════════════════════
 
 ABSOLUTE RULES — you MUST follow all of these without exception:
@@ -222,24 +225,24 @@ Present only documented information. Do not add clinical interpretation or recom
 
   NOTE_ASSISTANCE: `Task: Draft a structured SOAP consultation note based strictly on the documented patient record. This draft is for the treating doctor's review, editing, and approval — it is not a final medical record entry.
 
-The note MUST follow this exact structure:
+The note MUST follow this exact structure. Each section heading MUST include the colon — the system validates their presence.
 
-## Subjective
+## Subjective:
 [Chief complaint as documented.] [HPI as documented.] [Relevant past medical history as documented.] [Allergies as documented: NKDA or list.]
 
-## Objective
+## Objective:
 **Vitals:** [BP, pulse, temperature, weight — documented values only. If vital trends documented, note: "BP trending [direction] per VITAL SIGN TRENDS."]
 **Examination findings:** [As documented in current visit record.]
 **Investigations:** [Any documented investigation results noted in the record.]
 
-## Assessment
+## Assessment:
 [Each documented diagnosis on its own line:]
 - **[Diagnosis name]** ([laterality]) — [provisional / confirmed] (Source: V0 [date])
 
 [Note documented diagnosis changes if present:]
 - [NEWLY DOCUMENTED at this visit / CONFIRMED at this visit (Source: Vn → V0)]
 
-## Plan
+## Plan:
 **Medications documented:**
 [Each drug on its own line:]
 - **[Drug name]** ([laterality]): [dosage] [frequency] for [duration] via [route]
