@@ -32,7 +32,15 @@ import {
   type VisitDTO,
 } from "@/lib/ppms-client";
 import { toSafePatientSummary, estimateTokens } from "./pii";
-import { extractClinicalEvidence, renderClinicalEvidence } from "./evidence";
+import {
+  extractClinicalEvidence,
+  extractClinicalFindings,
+  extractVitalTrends,
+  renderClinicalEvidence,
+  renderClinicalFindings,
+  renderVisitReferenceGuide,
+  renderVitalTrends,
+} from "./evidence";
 import type { PatientContext, BuildContextArgs, FetchedContext } from "./types";
 
 // ── Data fetcher ──────────────────────────────────────────────────────────────
@@ -171,33 +179,68 @@ export async function buildPatientContext(
   sections.push("=== PATIENT ===");
   sections.push(renderDemographics(safe));
 
-  // ── CURRENT VISIT ─────────────────────────────────────────────────────────
-  if (fetched.currentVisit) {
-    sections.push("\n=== CURRENT VISIT ===");
-    sections.push(renderVisit(fetched.currentVisit, "Current visit"));
-  }
-
-  // ── PREVIOUS VISITS ───────────────────────────────────────────────────────
+  // All visits combined (current + previous), newest-first, for evidence/trend computation
   const previousVisits = fetched.visitHistory.filter((v) => v.visitId !== visitId);
-  if (previousVisits.length > 0) {
-    sections.push("\n=== PREVIOUS VISITS (newest first) ===");
-    previousVisits.forEach((v, i) => {
-      sections.push(renderVisit(v, `Visit ${i + 1}`));
-    });
-  }
-
-  // ── CLINICAL EVIDENCE (pre-computed) ──────────────────────────────────────
-  // Build evidence from all visits combined (current + previous), newest-first
   const allVisitsForEvidence: VisitDTO[] = [
     ...(fetched.currentVisit ? [fetched.currentVisit] : []),
     ...previousVisits,
   ];
+
+  // ── VISIT REFERENCE GUIDE ─────────────────────────────────────────────────
+  // Emitted at top so the AI can cite visit dates as evidence sources.
+  if (allVisitsForEvidence.length >= 1) {
+    const refGuide = renderVisitReferenceGuide(allVisitsForEvidence);
+    if (refGuide) {
+      sections.push("\n=== VISIT REFERENCE GUIDE ===");
+      sections.push(refGuide);
+    }
+  }
+
+  // ── CURRENT VISIT ─────────────────────────────────────────────────────────
+  if (fetched.currentVisit) {
+    sections.push("\n=== CURRENT VISIT (V0) ===");
+    sections.push(renderVisit(fetched.currentVisit, "Current visit (V0)"));
+  }
+
+  // ── PREVIOUS VISITS ───────────────────────────────────────────────────────
+  if (previousVisits.length > 0) {
+    sections.push("\n=== PREVIOUS VISITS (newest first) ===");
+    previousVisits.forEach((v, i) => {
+      sections.push(renderVisit(v, `Visit V${i + 1} (${v.date})`));
+    });
+  }
+
+  // ── VITAL TRENDS (application-computed) ───────────────────────────────────
+  if (allVisitsForEvidence.length >= 2) {
+    const vitalTrends = extractVitalTrends(allVisitsForEvidence);
+    const vitalText = renderVitalTrends(vitalTrends);
+    if (vitalText.trim()) {
+      sections.push("\n=== VITAL SIGN TRENDS (computed — do not recalculate) ===");
+      sections.push(vitalText);
+    }
+  }
+
+  // ── CLINICAL EVIDENCE (pre-computed) ──────────────────────────────────────
   if (allVisitsForEvidence.length >= 1) {
     const evidence = extractClinicalEvidence(allVisitsForEvidence);
     const evidenceText = renderClinicalEvidence(evidence);
     if (evidenceText.trim()) {
       sections.push("\n=== CLINICAL EVIDENCE (pre-computed from structured record) ===");
       sections.push(evidenceText);
+    }
+
+    // ── STRUCTURED CLINICAL FINDINGS ────────────────────────────────────────
+    const vitalTrendsForFindings = extractVitalTrends(allVisitsForEvidence);
+    const findings = extractClinicalFindings(
+      allVisitsForEvidence,
+      evidence.medicationDeltas,
+      evidence.diagnosisDeltas,
+      vitalTrendsForFindings,
+    );
+    const findingsText = renderClinicalFindings(findings);
+    if (findingsText.trim()) {
+      sections.push("\n=== STRUCTURED CLINICAL FINDINGS (cite these directly) ===");
+      sections.push(findingsText);
     }
   }
 

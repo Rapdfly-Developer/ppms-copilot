@@ -67,3 +67,46 @@ export type ClinicalEvidence = {
   // Follow-up dates documented across visits
   followUpHistory: Array<{ date: string; visitDate: string; advice?: string }>;
 };
+
+// ── Structured clinical findings ─────────────────────────────────────────────
+// Pre-computed, categorised findings surfaced to the AI as explicit evidence.
+// Prevents the LLM from overlooking longitudinal changes.
+
+export type ClinicalFindingCategory =
+  | "medication_change"
+  | "diagnosis_change"
+  | "vital_change"
+  | "investigation_change"
+  | "followup_change"
+  | "unresolved_issue"
+  | "missing_information";
+
+export type ClinicalFinding = {
+  category: ClinicalFindingCategory;
+  finding: string;      // concise description of what changed
+  previous: string;     // previous state / value
+  current: string;      // current state / value
+  change: string;       // direction or delta ("INCREASED +8", "REMOVED", "NEW")
+  dateSource: string;   // e.g. "V1 2023-12-10 → V0 2024-06-15"
+  importance: "high" | "medium" | "low";
+};
+
+// ── Vital trends ─────────────────────────────────────────────────────────────
+// Computed in application code — never inferred by the LLM.
+
+export type VitalDataPoint = {
+  visitRef: string;  // e.g. "V0", "V1"
+  date: string;
+  raw: string;       // original string value
+  numeric?: number;  // parsed numeric (e.g. systolic for BP)
+};
+
+export type VitalTrend = {
+  vital: string;
+  unit: string;
+  points: VitalDataPoint[];
+  direction?: "increased" | "decreased" | "stable" | "variable";
+  delta?: string;     // e.g. "+8" or "-4"
+  first?: string;     // earliest value
+  latest?: string;    // most recent value
+};

@@ -68,6 +68,11 @@ export function getCopilotFastModel(): string {
   return process.env.COPILOT_FAST_MODEL?.trim() || getAiModel();
 }
 
+// Reasoning model defaults to the 120b variant for deeper longitudinal analysis.
+// Override with COPILOT_REASONING_MODEL env var.
 export function getCopilotReasoningModel(): string {
-  return process.env.COPILOT_REASONING_MODEL?.trim() || getAiModel();
+  if (process.env.COPILOT_REASONING_MODEL?.trim()) return process.env.COPILOT_REASONING_MODEL.trim();
+  // If AI_MODEL is explicitly set, use it for both tiers
+  if (process.env.AI_MODEL?.trim()) return process.env.AI_MODEL.trim();
+  return getAiProvider() === "anthropic" ? "claude-opus-5" : "openai/gpt-oss-120b";
 }
