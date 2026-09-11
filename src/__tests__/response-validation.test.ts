@@ -35,13 +35,15 @@ describe("Response validation", () => {
   });
 
   describe("Unsafe patterns (hard reject)", () => {
+    // Note: "the diagnosis is" and "the condition is" are NOT listed here —
+    // the sanitiser rewrites them to safe documentary form before the hard check runs.
+    // Truly prescriptive/diagnostic language that cannot be safely rewritten remains.
     const unsafePhrases = [
       "I recommend you take this medication.",
       "You should start timolol eye drops.",
       "You should stop the current treatment.",
       "I diagnose this patient with glaucoma.",
       "I prescribe latanoprost drops.",
-      "The diagnosis is primary open-angle glaucoma.",
       "This patient definitely has retinal detachment.",
       "Change the dose to 20mg daily.",
       "Start treatment with latanoprost.",
@@ -85,6 +87,36 @@ describe("Response validation", () => {
         if (r.ok) expect(r.warnings.length).toBeGreaterThan(0);
       });
     }
+  });
+
+  describe("Sanitiser — documentary rewrites pass through", () => {
+    it("converts 'the diagnosis is' to safe documentary form and allows the response", () => {
+      // The model sometimes outputs "the diagnosis is X" meaning "the record documents X".
+      // The sanitiser rewrites it to "The documented diagnosis shows X" before the hard check.
+      const r = validateResponse(
+        "The diagnosis is primary open-angle glaucoma as documented at V0 2024-06-15.",
+        CAP,
+      );
+      expect(r.ok).toBe(true);
+    });
+
+    it("converts 'the condition is' to safe documentary form and allows the response", () => {
+      const r = validateResponse(
+        "The condition is stable based on documented vital signs and clinical notes.",
+        CAP,
+      );
+      expect(r.ok).toBe(true);
+    });
+
+    it("still rejects 'I diagnose' even after sanitiser runs", () => {
+      // The sanitiser has no rewrite rule for 'I diagnose' — it remains and hard-rejects.
+      const r = validateResponse(
+        "I diagnose this patient with primary open-angle glaucoma.",
+        CAP,
+      );
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.code).toBe("RESPONSE_UNSAFE");
+    });
   });
 
   describe("Safe responses (no issues)", () => {

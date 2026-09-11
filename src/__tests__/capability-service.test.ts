@@ -284,8 +284,11 @@ describe("NOTE_ASSISTANCE capability", () => {
     expect(frames.find((f) => f.type === "done")).toBeUndefined();
   });
 
-  it("rejects AI output that states a definitive new diagnosis", async () => {
-    const UNSAFE_AI = "The diagnosis is primary open-angle glaucoma with macular degeneration.\n\n**Subjective:**\nPatient presents.\n**Objective:**\nFindings.\n**Assessment:**\nGlaucoma.\n**Plan:**\nContinue.";
+  it("rejects AI output using first-person prescriptive language (I diagnose)", async () => {
+    // "I diagnose" is genuinely unsafe — the sanitiser has no rewrite for it so it hard-rejects.
+    // (Previously tested "The diagnosis is X" but that phrase is now sanitised to safe
+    // documentary form "The documented diagnosis shows X" and allowed through.)
+    const UNSAFE_AI = "I diagnose this patient with primary open-angle glaucoma.\n\n## Subjective:\nPatient presents.\n## Objective:\nFindings.\n## Assessment:\nGlaucoma.\n## Plan:\nContinue.";
     setProvider(makeMockProvider(UNSAFE_AI));
 
     const frames = await collectFrames({ capability: "NOTE_ASSISTANCE" }, `Bearer ${FIXTURE_TOKEN}`);

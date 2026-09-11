@@ -61,6 +61,19 @@ const SANITISE_RULES: { pattern: RegExp; replacement: string }[] = [
     pattern: /\bI advise\b/gi,
     replacement: "The record advises",
   },
+  // "the diagnosis is" → "The documented diagnosis shows"
+  // The AI uses this phrase in a documentary sense ("the diagnosis is glaucoma" = "the
+  // record documents glaucoma"), but the hard-reject pattern cannot distinguish documentary
+  // from prescriptive use.  The rewrite makes the intent unambiguously documentary.
+  {
+    pattern: /\bthe\s+diagnosis\s+is\b/gi,
+    replacement: "The documented diagnosis shows",
+  },
+  // "the condition is" → "The documented condition is noted as"
+  {
+    pattern: /\bthe\s+condition\s+is\b/gi,
+    replacement: "The documented condition is noted as",
+  },
 ];
 
 /**
