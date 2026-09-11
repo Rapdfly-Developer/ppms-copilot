@@ -155,23 +155,14 @@ function renderVisit(visit: VisitDTO, label: string): string {
   return lines.join("\n");
 }
 
-// ── Public API ────────────────────────────────────────────────────────────────
+// ── Shared rendering ──────────────────────────────────────────────────────────
+// Renders a FetchedContext into the context text and stats.
+// Used by both buildPatientContext (per-capability) and buildConsolidatedContext.
 
-export async function buildPatientContext(
-  args: BuildContextArgs,
-): Promise<PatientContext> {
-  const { token, capability, patientRef, visitId } = args;
-  const start = Date.now();
-
-  let fetched: FetchedContext;
-  try {
-    fetched = await fetchContext(token, capability, patientRef, visitId);
-  } catch (err) {
-    const code = err instanceof CopilotError ? err.code : "INTERNAL_ERROR";
-    logger.error("context_fetch_failed", { capability, code });
-    throw err;
-  }
-
+function renderFetchedContext(
+  fetched: FetchedContext,
+  visitId: string,
+): { text: string; stats: PatientContext["stats"] } {
   const safe = toSafePatientSummary(fetched.patient);
   const sections: string[] = [];
 
@@ -187,7 +178,6 @@ export async function buildPatientContext(
   ];
 
   // ── VISIT REFERENCE GUIDE ─────────────────────────────────────────────────
-  // Emitted at top so the AI can cite visit dates as evidence sources.
   if (allVisitsForEvidence.length >= 1) {
     const refGuide = renderVisitReferenceGuide(allVisitsForEvidence);
     if (refGuide) {
@@ -268,15 +258,81 @@ export async function buildPatientContext(
 
   const text = sections.join("\n");
   const stats = {
-    visitsIncluded:
-      (fetched.currentVisit ? 1 : 0) + fetched.visitHistory.length,
+    visitsIncluded: (fetched.currentVisit ? 1 : 0) + fetched.visitHistory.length,
     appointmentsIncluded: fetched.appointments.length,
     timelineEventsIncluded: fetched.timeline.length,
     estimatedTokens: estimateTokens(text),
   };
 
+  return { text, stats };
+}
+
+// ── Public API ────────────────────────────────────────────────────────────────
+
+export async function buildPatientContext(
+  args: BuildContextArgs,
+): Promise<PatientContext> {
+  const { token, capability, patientRef, visitId } = args;
+  const start = Date.now();
+
+  let fetched: FetchedContext;
+  try {
+    fetched = await fetchContext(token, capability, patientRef, visitId);
+  } catch (err) {
+    const code = err instanceof CopilotError ? err.code : "INTERNAL_ERROR";
+    logger.error("context_fetch_failed", { capability, code });
+    throw err;
+  }
+
+  const { text, stats } = renderFetchedContext(fetched, visitId);
+
   logger.info("context_built", {
     capability,
+    durationMs: Date.now() - start,
+    visitsIncluded: stats.visitsIncluded,
+    appointmentsIncluded: stats.appointmentsIncluded,
+    timelineEventsIncluded: stats.timelineEventsIncluded,
+    estimatedTokens: stats.estimatedTokens,
+  });
+
+  return { text, stats, visitId };
+}
+
+// Fetches the union of all MVP capabilities' data needs in one Promise.all,
+// then renders a single context text. Used by the consolidated generate endpoint.
+export async function buildConsolidatedContext(args: {
+  token: string;
+  patientRef: string;
+  visitId: string;
+}): Promise<PatientContext> {
+  const { token, patientRef, visitId } = args;
+  const start = Date.now();
+
+  let fetched: FetchedContext;
+  try {
+    // Fetch everything needed across all 6 MVP capabilities at once:
+    //   demographics: always
+    //   currentVisit: PATIENT_SNAPSHOT, IMPORTANT_CHANGES, NOTE_ASSISTANCE, FOLLOW_UP_SUMMARY
+    //   visitHistory(6): IMPORTANT_CHANGES needs 6; others need 3 — use the max
+    //   appointments(10): TIMELINE_SUMMARY and FOLLOW_UP_SUMMARY
+    //   timeline: TIMELINE_SUMMARY
+    const [patient, currentVisit, visitHistory, appointments, timeline] = await Promise.all([
+      getPatient(token, patientRef),
+      getVisit(token, patientRef, visitId),
+      getVisits(token, patientRef, 6),
+      getAppointments(token, patientRef, 10),
+      getTimeline(token, patientRef),
+    ]);
+    fetched = { patient, currentVisit, visitHistory, appointments, timeline };
+  } catch (err) {
+    const code = err instanceof CopilotError ? err.code : "INTERNAL_ERROR";
+    logger.error("consolidated_context_fetch_failed", { code });
+    throw err;
+  }
+
+  const { text, stats } = renderFetchedContext(fetched, visitId);
+
+  logger.info("consolidated_context_built", {
     durationMs: Date.now() - start,
     visitsIncluded: stats.visitsIncluded,
     appointmentsIncluded: stats.appointmentsIncluded,

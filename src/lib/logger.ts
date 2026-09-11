@@ -40,6 +40,9 @@ export type SafeLogContext = {
   safetyResult?: string;      // "ok" | "unsafe" | "warning" | "truncated" | "empty"
   latencyMs?: number;         // total pipeline latency including context fetch + AI call
   delayMs?: number;           // retry backoff delay (rate-limit retries)
+  section?: string;           // section key for per-section log events (generate endpoint)
+  sectionResults?: Record<string, string>; // per-section outcome map (generate endpoint)
+  preview?: string;           // short preview of raw AI text on parse failure (no PII)
 };
 
 function emit(level: LogLevel, event: string, ctx?: SafeLogContext): void {

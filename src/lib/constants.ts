@@ -21,3 +21,5 @@ export const MSG_PLUGIN_TOKEN_EXPIRED = "PLUGIN_TOKEN_EXPIRED" as const;
 
 // API route paths (server-side only)
 export const COPILOT_STREAM_PATH = "/api/copilot/stream" as const;
+// Consolidated endpoint: one request → all six sections as structured JSON
+export const COPILOT_GENERATE_PATH = "/api/copilot/generate" as const;

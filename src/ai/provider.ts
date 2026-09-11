@@ -16,6 +16,7 @@ export type AiRequest = {
   temperature?: number; // defaults to 0.3 in each provider
   reasoningEffort?: "medium" | "high"; // high → lower temp, potentially different model
   modelOverride?: string; // use a specific model for this request instead of provider default
+  responseFormat?: "json_object"; // when set, instructs the provider to return valid JSON
 };
 
 export type AiUsage = {

@@ -1,27 +1,99 @@
 "use client";
 
-// Main Copilot application component.
+// Main Copilot application component — consolidated single-request architecture.
+//
+// Architecture:
+//   - ONE AI request per visit (on session arrival or explicit Regenerate)
+//   - Tab clicks change activeCapability only — zero additional AI calls
+//   - All six sections served from in-memory result after initial generation
 //
 // State machine:
-//   no-session → awaiting PPMS_INIT (no token yet)
-//   session + idle → auto-starts PATIENT_SNAPSHOT
-//   session + streaming/done → normal operation
+//   no-session → awaiting PPMS_INIT
+//   session + idle/loading → generating all six sections
+//   session + done → all tabs available instantly
 //   session + token-expired → shows expired UI, requests re-issue
 //
 // Security:
 //   - Token lives only in React state (memory), never persisted.
-//   - Capability switches abort any in-flight request.
+//   - Regenerate issues exactly one new consolidated request.
 //   - Draft text is editable before confirmation — never auto-saved.
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { usePostMessage } from "@/hooks/usePostMessage";
-import { useCopilotStream } from "@/hooks/useCopilotStream";
+import { useCopilotGenerate } from "@/hooks/useCopilotGenerate";
 import { CapabilitySelector } from "@/components/CapabilitySelector";
 import { ResponseArea } from "@/components/ResponseArea";
 import { ActionBar } from "@/components/ActionBar";
 import { CAPABILITY_CONFIG } from "@/capabilities";
 import { MAX_TOKEN_LIFETIME_MS } from "@/lib/constants";
-import type { Capability } from "@/types/client";
+import type { Capability, StreamState, CopilotGenerateState, SectionOutcome } from "@/types/client";
+
+// ── Capability → section key mapping ─────────────────────────────────────────
+
+type SectionKey = "snapshot" | "previousVisits" | "timeline" | "attention" | "draftNote" | "followUp";
+
+const CAPABILITY_TO_SECTION: Partial<Record<Capability, SectionKey>> = {
+  PATIENT_SNAPSHOT: "snapshot",
+  PREVIOUS_VISIT_SUMMARY: "previousVisits",
+  TIMELINE_SUMMARY: "timeline",
+  IMPORTANT_CHANGES: "attention",
+  NOTE_ASSISTANCE: "draftNote",
+  FOLLOW_UP_SUMMARY: "followUp",
+};
+
+// Converts the consolidated state + active capability into the StreamState
+// shape that ResponseArea already understands — no changes needed to ResponseArea.
+function toStreamState(
+  copilotState: CopilotGenerateState,
+  capability: Capability,
+): StreamState {
+  if (copilotState.status === "idle" || copilotState.status === "loading") {
+    return {
+      status: copilotState.status,
+      text: "",
+      warnings: [],
+    };
+  }
+
+  if (copilotState.status === "error") {
+    return {
+      status: "error",
+      text: "",
+      warnings: [],
+      errorMessage: copilotState.errorMessage,
+      errorCode: copilotState.errorCode,
+    };
+  }
+
+  // status === "done" — look up section
+  const key = CAPABILITY_TO_SECTION[capability];
+  if (!key) {
+    return { status: "idle", text: "", warnings: [] };
+  }
+
+  const section: SectionOutcome = copilotState.data[key];
+  if (!section.ok) {
+    return {
+      status: "error",
+      text: "",
+      warnings: [],
+      errorMessage: section.errorMessage,
+      errorCode: section.errorCode,
+    };
+  }
+
+  const capConfig = CAPABILITY_CONFIG[capability];
+  return {
+    status: "done",
+    text: section.text,
+    warnings: section.warnings,
+    doneMeta: {
+      capability,
+      producesDraft: capConfig.producesDraft,
+      draftType: capConfig.draftType,
+    },
+  };
+}
 
 // ── Status dot ────────────────────────────────────────────────────────────────
 
@@ -30,7 +102,7 @@ function StatusDot({
   isExpired,
   hasSession,
 }: {
-  status: string;
+  status: CopilotGenerateState["status"];
   isExpired: boolean;
   hasSession: boolean;
 }) {
@@ -38,21 +110,25 @@ function StatusDot({
     ? "bg-red-400"
     : !hasSession
       ? "bg-gray-400"
-      : status === "streaming" || status === "loading"
+      : status === "loading"
         ? "bg-amber-400 animate-pulse"
         : status === "error"
           ? "bg-red-400"
-          : "bg-teal-500";
+          : status === "done"
+            ? "bg-teal-500"
+            : "bg-gray-400";
 
   const label = isExpired
     ? "Session expired"
     : !hasSession
       ? "Awaiting session"
-      : status === "streaming" || status === "loading"
+      : status === "loading"
         ? "Generating"
         : status === "error"
           ? "Error"
-          : "Ready";
+          : status === "done"
+            ? "Ready"
+            : "Awaiting session";
 
   return (
     <div
@@ -73,7 +149,7 @@ function Header({
   isExpired,
   hasSession,
 }: {
-  status: string;
+  status: CopilotGenerateState["status"];
   isExpired: boolean;
   hasSession: boolean;
 }) {
@@ -219,33 +295,39 @@ function Disclaimer() {
 
 export default function CopilotApp() {
   const { session, confirmDraft, requestTokenRefresh } = usePostMessage();
-  const { state, start, cancel, reset, clearCache, deleteCacheEntry } = useCopilotStream();
+  const { state, generate, regenerate, cancel } = useCopilotGenerate();
   const [activeCapability, setActiveCapability] = useState<Capability>("PATIENT_SNAPSHOT");
   const [draftText, setDraftText] = useState("");
   const [draftConfirmed, setDraftConfirmed] = useState(false);
 
   const sessionStartedRef = useRef<number | null>(null);
 
-  // Auto-start PATIENT_SNAPSHOT when a new session arrives.
+  // Trigger ONE consolidated generation when a new session arrives.
+  // The ref guard prevents double-firing from React Strict Mode re-execution.
   useEffect(() => {
     if (!session) return;
     if (session.initiatedAt === sessionStartedRef.current) return;
     sessionStartedRef.current = session.initiatedAt;
 
-    // New visit → clear cached responses from the previous visit.
-    clearCache();
+    // New visit → reset UI state, then generate all six sections at once.
     setActiveCapability("PATIENT_SNAPSHOT");
     setDraftText("");
     setDraftConfirmed(false);
-    start("PATIENT_SNAPSHOT", session.token, undefined, `${session.visitId}:PATIENT_SNAPSHOT`);
-  }, [session?.initiatedAt, start, clearCache]);
+    generate(session.token, session.visitId);
+  }, [session?.initiatedAt, generate]);
 
-  // Sync draft text when streaming completes for a draft capability.
+  // Sync draft text when generation completes for the active draft capability.
   useEffect(() => {
-    if (state.status === "done" && state.doneMeta?.producesDraft && state.text) {
-      setDraftText(state.text);
+    if (state.status !== "done") return;
+    const sectionKey = CAPABILITY_TO_SECTION[activeCapability];
+    if (!sectionKey) return;
+    const capConfig = CAPABILITY_CONFIG[activeCapability];
+    if (!capConfig.producesDraft) return;
+    const section = state.data[sectionKey];
+    if (section.ok && section.text) {
+      setDraftText(section.text);
     }
-  }, [state.status]);
+  }, [state.status, activeCapability]);
 
   // Periodic re-render to detect expiry.
   const [, setTick] = useState(0);
@@ -259,18 +341,29 @@ export default function CopilotApp() {
     session !== null && Date.now() - session.initiatedAt >= MAX_TOKEN_LIFETIME_MS;
 
   const capConfig = CAPABILITY_CONFIG[activeCapability];
+  const isLoading = state.status === "loading";
 
+  // Tab clicks ONLY change the active tab — no AI calls.
   const selectCapability = useCallback(
     (cap: Capability) => {
-      if (!session || state.status === "loading" || state.status === "streaming") return;
-      cancel();
+      if (isLoading) return;
       setActiveCapability(cap);
       setDraftText("");
       setDraftConfirmed(false);
-      // Pass a cache key so already-fetched tabs are served instantly.
-      start(cap, session.token, undefined, `${session.visitId}:${cap}`);
+
+      // If switching to a draft capability and data is already loaded, sync text.
+      if (state.status === "done") {
+        const sectionKey = CAPABILITY_TO_SECTION[cap];
+        const newCapConfig = CAPABILITY_CONFIG[cap];
+        if (sectionKey && newCapConfig.producesDraft) {
+          const section = state.data[sectionKey];
+          if (section.ok && section.text) {
+            setDraftText(section.text);
+          }
+        }
+      }
     },
-    [session, state.status, cancel, start],
+    [isLoading, state],
   );
 
   const handleConfirmDraft = useCallback(() => {
@@ -281,17 +374,16 @@ export default function CopilotApp() {
     setDraftConfirmed(true);
   }, [session, draftText, draftConfirmed, capConfig.draftType, confirmDraft]);
 
+  // Regenerate: one new consolidated request for ALL six sections.
   const handleRegenerate = useCallback(() => {
     if (!session) return;
     setDraftText("");
     setDraftConfirmed(false);
-    const cacheKey = `${session.visitId}:${activeCapability}`;
-    deleteCacheEntry(cacheKey);
-    reset();
-    start(activeCapability, session.token, undefined, cacheKey);
-  }, [session, activeCapability, reset, start, deleteCacheEntry]);
+    regenerate(session.token, session.visitId);
+  }, [session, regenerate]);
 
-  const isStreaming = state.status === "loading" || state.status === "streaming";
+  // Derive per-tab stream state from the consolidated result (no AI calls).
+  const sectionStreamState = toStreamState(state, activeCapability);
 
   return (
     <div className="flex flex-col h-screen bg-white overflow-hidden">
@@ -312,7 +404,7 @@ export default function CopilotApp() {
           <CapabilitySelector
             active={activeCapability}
             onSelect={selectCapability}
-            disabled={isStreaming}
+            disabled={isLoading}
           />
 
           {/* Capability description */}
@@ -322,7 +414,7 @@ export default function CopilotApp() {
           </div>
 
           <ResponseArea
-            state={state}
+            state={sectionStreamState}
             isDraft={capConfig.producesDraft}
             draftText={draftText}
             onDraftChange={setDraftText}
@@ -330,10 +422,14 @@ export default function CopilotApp() {
           />
 
           <ActionBar
-            status={state.status}
+            status={sectionStreamState.status}
             isDraft={capConfig.producesDraft}
             draftConfirmed={draftConfirmed}
-            text={capConfig.producesDraft && state.status === "done" ? draftText : state.text}
+            text={
+              capConfig.producesDraft && sectionStreamState.status === "done"
+                ? draftText
+                : sectionStreamState.text
+            }
             onConfirmDraft={handleConfirmDraft}
             onRegenerate={handleRegenerate}
             onCancel={cancel}

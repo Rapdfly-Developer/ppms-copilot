@@ -79,6 +79,9 @@ export class GroqProvider implements AIProvider {
           ...req.messages.map((m) => ({ role: m.role, content: m.content })),
         ],
         stream: false,
+        ...(req.responseFormat === "json_object"
+          ? { response_format: { type: "json_object" as const } }
+          : {}),
       });
 
       const choice = response.choices[0];

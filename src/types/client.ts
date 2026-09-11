@@ -1,6 +1,27 @@
 // Client-safe types for the Copilot UI.
 // No server-only imports permitted in this file.
 
+// ── Consolidated generate types ───────────────────────────────────────────────
+
+export type SectionOutcome =
+  | { ok: true; text: string; warnings: string[] }
+  | { ok: false; errorCode: string; errorMessage: string };
+
+export type CopilotData = {
+  snapshot: SectionOutcome;
+  previousVisits: SectionOutcome;
+  timeline: SectionOutcome;
+  attention: SectionOutcome;
+  draftNote: SectionOutcome;
+  followUp: SectionOutcome;
+};
+
+export type CopilotGenerateState =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "done"; data: CopilotData; meta: Record<string, unknown> }
+  | { status: "error"; errorCode: string; errorMessage: string };
+
 export type Capability =
   | "PATIENT_SNAPSHOT"
   | "PREVIOUS_VISIT_SUMMARY"
