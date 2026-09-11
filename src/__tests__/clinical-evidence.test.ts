@@ -615,13 +615,13 @@ describe("Capability config — reasoning effort and model tier", () => {
     expect(CAPABILITY_CONFIG.TIMELINE_SUMMARY.modelTier).toBe("fast");
   });
 
-  it("maxTokens are increased vs original limits", async () => {
+  it("maxTokens are within cost-optimised limits", async () => {
     const { CAPABILITY_CONFIG } = await import("@/capabilities");
     // Original: 500 for PATIENT_SNAPSHOT; upgraded to 700
     expect(CAPABILITY_CONFIG.PATIENT_SNAPSHOT.maxTokens).toBeGreaterThanOrEqual(700);
     // Original: 600 for IMPORTANT_CHANGES; upgraded to 1400
     expect(CAPABILITY_CONFIG.IMPORTANT_CHANGES.maxTokens).toBeGreaterThanOrEqual(1400);
-    // Original: 1200 for NOTE_ASSISTANCE; upgraded to 1800
-    expect(CAPABILITY_CONFIG.NOTE_ASSISTANCE.maxTokens).toBeGreaterThanOrEqual(1800);
+    // NOTE_ASSISTANCE reduced from 1800 → 1400 to cut Active CPU (audit C2)
+    expect(CAPABILITY_CONFIG.NOTE_ASSISTANCE.maxTokens).toBeGreaterThanOrEqual(1400);
   });
 });

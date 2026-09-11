@@ -211,8 +211,12 @@ export async function buildPatientContext(
   }
 
   // ── VITAL TRENDS (application-computed) ───────────────────────────────────
-  if (allVisitsForEvidence.length >= 2) {
-    const vitalTrends = extractVitalTrends(allVisitsForEvidence);
+  // Compute once and reuse for both the trends section and structured findings.
+  const vitalTrends = allVisitsForEvidence.length >= 2
+    ? extractVitalTrends(allVisitsForEvidence)
+    : [];
+
+  if (vitalTrends.length > 0) {
     const vitalText = renderVitalTrends(vitalTrends);
     if (vitalText.trim()) {
       sections.push("\n=== VITAL SIGN TRENDS (computed — do not recalculate) ===");
@@ -230,12 +234,11 @@ export async function buildPatientContext(
     }
 
     // ── STRUCTURED CLINICAL FINDINGS ────────────────────────────────────────
-    const vitalTrendsForFindings = extractVitalTrends(allVisitsForEvidence);
     const findings = extractClinicalFindings(
       allVisitsForEvidence,
       evidence.medicationDeltas,
       evidence.diagnosisDeltas,
-      vitalTrendsForFindings,
+      vitalTrends,
     );
     const findingsText = renderClinicalFindings(findings);
     if (findingsText.trim()) {

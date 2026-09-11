@@ -206,10 +206,12 @@ export async function getAppointments(
 export async function getTimeline(
   token: string,
   patientRef: string,
+  limit = 50,
 ): Promise<TimelineEventDTO[]> {
+  const safeLimit = Math.min(Math.max(1, limit), 100);
   const data = await ppmsGet<{ timeline: TimelineEventDTO[] }>(
     token,
-    `/api/v1/patients/${encodeURIComponent(patientRef)}/timeline`,
+    `/api/v1/patients/${encodeURIComponent(patientRef)}/timeline?limit=${safeLimit}`,
   );
   return data.timeline;
 }

@@ -15,6 +15,7 @@ type LogLevel = "debug" | "info" | "warn" | "error";
 
 // Explicitly typed to prevent accidental PII fields
 export type SafeLogContext = {
+  requestId?: string;
   capability?: string;
   visitId?: string;
   endpoint?: string;

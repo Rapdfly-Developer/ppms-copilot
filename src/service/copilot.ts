@@ -38,6 +38,7 @@ export async function* streamCopilotResponse(
   authorizationHeader: string | null,
 ): AsyncIterable<NdjsonFrame> {
   const pipelineStart = Date.now();
+  const requestId = Math.random().toString(36).slice(2, 10);
 
   // 1. Parse & validate
   const parsed = parseRequest(body, authorizationHeader);
@@ -62,7 +63,7 @@ export async function* streamCopilotResponse(
   } catch (err) {
     const code =
       err instanceof CopilotError ? err.code : ("INTERNAL_ERROR" as ErrorCode);
-    logger.error("pipeline_context_failed", { capability, code });
+    logger.error("pipeline_context_failed", { requestId, capability, code });
     yield errorFrame(code, code);
     return;
   }
@@ -74,13 +75,14 @@ export async function* streamCopilotResponse(
   // 4. Check AI provider
   const provider = createProvider();
   if (!provider.isConfigured()) {
-    logger.error("pipeline_provider_not_configured", { capability });
+    logger.error("pipeline_provider_not_configured", { requestId, capability });
     yield errorFrame("AI_NOT_CONFIGURED", "AI_NOT_CONFIGURED");
     return;
   }
 
   // Log request start with observability fields
   logger.info("pipeline_request_start", {
+    requestId,
     capability,
     model: modelOverride,
     modelTier: capConfig.modelTier,
@@ -116,13 +118,13 @@ export async function* streamCopilotResponse(
           stopReason: event.stopReason,
         };
       } else if (event.type === "error") {
-        logger.error("pipeline_stream_error", { capability, code: event.code });
+        logger.error("pipeline_stream_error", { requestId, capability, code: event.code });
         yield errorFrame(event.code, event.code as ErrorCode);
         return;
       }
     }
   } catch {
-    logger.error("pipeline_stream_exception", { capability });
+    logger.error("pipeline_stream_exception", { requestId, capability });
     yield errorFrame("AI_UNAVAILABLE", "AI_UNAVAILABLE");
     return;
   }
@@ -149,6 +151,7 @@ export async function* streamCopilotResponse(
 
   if (!validation.ok) {
     logger.warn("pipeline_validation_failed", {
+      requestId,
       capability,
       code: validation.code,
       safetyResult,
@@ -161,6 +164,7 @@ export async function* streamCopilotResponse(
   // 8. Emit warnings (if any)
   if (validation.warnings.length > 0) {
     logger.info("pipeline_warnings", {
+      requestId,
       capability,
       warningCount: validation.warnings.length,
       safetyResult,
@@ -170,6 +174,7 @@ export async function* streamCopilotResponse(
 
   // Log pipeline completion with full observability
   logger.info("pipeline_complete", {
+    requestId,
     capability,
     model: doneMeta.model as string,
     provider: doneMeta.provider as string,
@@ -187,6 +192,7 @@ export async function* streamCopilotResponse(
     type: "done",
     meta: {
       ...doneMeta,
+      requestId,
       capability,
       modelTier: capConfig.modelTier,
       reasoningEffort: capConfig.reasoningEffort,

@@ -101,49 +101,68 @@ export class AnthropicProvider implements AIProvider {
     }
 
     const start = Date.now();
-    try {
-      const stream = this.client.messages.stream({
-        model: this.model,
-        max_tokens: req.maxTokens,
-        temperature: req.temperature ?? 0.3,
-        system: req.systemPrompt,
-        messages: req.messages.map((m) => ({ role: m.role, content: m.content })),
-      });
 
-      for await (const event of stream) {
-        if (
-          event.type === "content_block_delta" &&
-          event.delta.type === "text_delta"
-        ) {
-          yield { type: "text", text: event.delta.text };
+    // Retry on 429 (rate-limited) only if no text frames have been yielded yet.
+    // Anthropic 429s arrive before content begins, so this is safe.
+    const RETRY_DELAYS_MS = [3000, 6000];
+    const streamParams = {
+      model: req.modelOverride ?? this.model,
+      max_tokens: req.maxTokens,
+      temperature: req.temperature ?? 0.3,
+      system: req.systemPrompt,
+      messages: req.messages.map((m) => ({ role: m.role, content: m.content })) as Parameters<typeof this.client.messages.stream>[0]["messages"],
+    };
+
+    for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
+      let textYielded = false;
+      try {
+        const anthropicStream = this.client.messages.stream(streamParams);
+
+        for await (const event of anthropicStream) {
+          if (
+            event.type === "content_block_delta" &&
+            event.delta.type === "text_delta"
+          ) {
+            textYielded = true;
+            yield { type: "text", text: event.delta.text };
+          }
         }
+
+        const final = await anthropicStream.finalMessage();
+        const usage: AiUsage = {
+          inputTokens: final.usage.input_tokens,
+          outputTokens: final.usage.output_tokens,
+        };
+
+        logger.info("ai_stream_success", {
+          provider: this.id,
+          model: final.model,
+          inputTokens: usage.inputTokens,
+          outputTokens: usage.outputTokens,
+          durationMs: Date.now() - start,
+        });
+
+        yield {
+          type: "done",
+          model: final.model,
+          provider: this.id,
+          usage,
+          stopReason: final.stop_reason ?? "end_turn",
+        };
+        return;
+      } catch (err) {
+        const { code } = this.classifyError(err);
+        // Only retry if no content was yielded — otherwise the client already has partial data
+        if (code === "AI_RATE_LIMITED" && !textYielded && attempt < RETRY_DELAYS_MS.length) {
+          const delayMs = RETRY_DELAYS_MS[attempt];
+          logger.info("anthropic_rate_limit_retry", { delayMs, model: this.model });
+          await new Promise((r) => setTimeout(r, delayMs));
+          continue;
+        }
+        logger.error("ai_stream_error", { code, durationMs: Date.now() - start });
+        yield { type: "error", code, message: "AI stream failed" };
+        return;
       }
-
-      const final = await stream.finalMessage();
-      const usage: AiUsage = {
-        inputTokens: final.usage.input_tokens,
-        outputTokens: final.usage.output_tokens,
-      };
-
-      logger.info("ai_stream_success", {
-        provider: this.id,
-        model: this.model,
-        inputTokens: usage.inputTokens,
-        outputTokens: usage.outputTokens,
-        durationMs: Date.now() - start,
-      });
-
-      yield {
-        type: "done",
-        model: final.model,
-        provider: this.id,
-        usage,
-        stopReason: final.stop_reason ?? "end_turn",
-      };
-    } catch (err) {
-      const { code } = this.classifyError(err);
-      logger.error("ai_stream_error", { code, durationMs: Date.now() - start });
-      yield { type: "error", code, message: "AI stream failed" };
     }
   }
 
