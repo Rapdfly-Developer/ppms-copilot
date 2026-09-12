@@ -76,37 +76,6 @@ export function ActionBar({
           Regenerate
         </button>
       )}
-
-      {/* Confirm draft — draft capabilities only, when done and not yet confirmed */}
-      {status === "done" && isDraft && (
-        <button
-          type="button"
-          onClick={onConfirmDraft}
-          disabled={draftConfirmed}
-          className={[
-            "px-4 py-1.5 text-xs font-semibold rounded-md transition-colors",
-            "focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-400",
-            draftConfirmed
-              ? "bg-green-100 text-green-700 border border-green-300 cursor-default"
-              : "bg-teal-600 text-white hover:bg-teal-700 active:bg-teal-800",
-          ].join(" ")}
-          aria-label={
-            draftConfirmed
-              ? "Draft confirmed and sent to PPMS"
-              : "Confirm draft and send to PPMS for saving"
-          }
-          aria-disabled={draftConfirmed}
-        >
-          {draftConfirmed ? "Draft Confirmed ✓" : "Confirm Draft"}
-        </button>
-      )}
-
-      {/* Spacer + context note for draft capabilities */}
-      {status === "done" && isDraft && !draftConfirmed && (
-        <span className="ml-auto text-xs text-slate-400 italic hidden sm:block">
-          Review and edit before confirming
-        </span>
-      )}
     </div>
   );
 }
