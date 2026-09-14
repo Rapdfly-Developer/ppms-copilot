@@ -30,6 +30,7 @@ export type Capability =
   | "IMPORTANT_CHANGES"
   | "NOTE_ASSISTANCE"
   | "FOLLOW_UP_SUMMARY"
+  | "DIFFERENTIAL_DIAGNOSIS"
   | "QUESTION";
 
 // Token stored only in memory — never in localStorage or cookies.

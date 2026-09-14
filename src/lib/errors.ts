@@ -23,6 +23,8 @@ export const ERROR_CODES = {
   RESPONSE_TRUNCATED: "RESPONSE_TRUNCATED",
   RESPONSE_UNSAFE: "RESPONSE_UNSAFE",
   NOTE_INCOMPLETE: "NOTE_INCOMPLETE",
+  DIFFERENTIAL_STRUCTURE_INVALID: "DIFFERENTIAL_STRUCTURE_INVALID",
+  DIFFERENTIAL_UNCITED: "DIFFERENTIAL_UNCITED",
   INVALID_CAPABILITY: "INVALID_CAPABILITY",
   MISSING_PERMISSION: "MISSING_PERMISSION",
   INVALID_REQUEST: "INVALID_REQUEST",
@@ -62,6 +64,10 @@ export const USER_MESSAGES: Record<ErrorCode, string> = {
   RESPONSE_TRUNCATED: "AI response was cut short. Please try again.",
   RESPONSE_UNSAFE: "AI response contained language that requires doctor review before display.",
   NOTE_INCOMPLETE: "AI note draft is missing required sections. Please try again.",
+  DIFFERENTIAL_STRUCTURE_INVALID:
+    "AI response did not follow the required differential format. Please try again.",
+  DIFFERENTIAL_UNCITED:
+    "AI response included an uncited diagnostic consideration and was discarded. Please try again.",
   INVALID_CAPABILITY: "Invalid capability requested.",
   MISSING_PERMISSION: "You do not have permission to use this feature.",
   INVALID_REQUEST: "Invalid request. Please try again.",

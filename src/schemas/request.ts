@@ -8,7 +8,7 @@
 //     only to extract routing fields. PPMS Core verifies the signature on every
 //     /api/v1/* call that uses this token.
 
-import { isValidCapability, type Capability } from "@/capabilities";
+import { isValidCapability, ALL_CAPABILITIES, type Capability } from "@/capabilities";
 
 export type CopilotRequest = {
   token: string;
@@ -106,7 +106,7 @@ export function parseRequest(
     return {
       ok: false,
       code: "INVALID_CAPABILITY",
-      message: `Invalid capability. Valid values: ${["PATIENT_SNAPSHOT","PREVIOUS_VISIT_SUMMARY","HISTORY_SUMMARY","TIMELINE_SUMMARY","IMPORTANT_CHANGES","NOTE_ASSISTANCE","FOLLOW_UP_SUMMARY","QUESTION"].join(", ")}`,
+      message: `Invalid capability. Valid values: ${ALL_CAPABILITIES.join(", ")}`,
       status: 400,
     };
   }

@@ -316,6 +316,8 @@ export async function buildConsolidatedContext(args: {
     //   visitHistory(6): IMPORTANT_CHANGES needs 6; others need 3 — use the max
     //   appointments(10): TIMELINE_SUMMARY and FOLLOW_UP_SUMMARY
     //   timeline: TIMELINE_SUMMARY
+    // DIFFERENTIAL_DIAGNOSIS is NOT part of this bundle — generated on-demand
+    // via buildPatientContext() through /api/copilot/stream instead.
     const [patient, currentVisit, visitHistory, appointments, timeline] = await Promise.all([
       getPatient(token, patientRef),
       getVisit(token, patientRef, visitId),

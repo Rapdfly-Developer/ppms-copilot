@@ -123,6 +123,34 @@ function DraftDisclaimer() {
   );
 }
 
+// ── Strong disclaimer banner (diagnosis-adjacent output only) ─────────────────
+// More explicit than DraftDisclaimer: used for output that could be mistaken
+// for an actual diagnosis rather than a documentation summary or editable draft.
+
+function StrongDisclaimer() {
+  return (
+    <div
+      className="flex gap-2 px-3 py-3 bg-rose-50 border-2 border-rose-300 rounded-md text-rose-900 text-xs mb-3"
+      role="alert"
+      aria-live="polite"
+    >
+      <span className="shrink-0 mt-0.5 text-rose-600" aria-hidden="true">⚠</span>
+      <span>
+        <strong className="font-semibold block mb-1">
+          This is NOT a diagnosis.
+        </strong>
+        AI-generated list of possible considerations based only on documented
+        symptoms, history, vitals, and existing diagnoses — it does not
+        include laboratory, imaging, or investigation result data, which are
+        not available to this system. These are prompts for the treating
+        doctor&apos;s own clinical judgement only. The doctor is solely
+        responsible for the final diagnostic decision and must not act on
+        this list without independent clinical assessment.
+      </span>
+    </div>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 interface ResponseAreaProps {
@@ -131,6 +159,7 @@ interface ResponseAreaProps {
   draftText: string;
   onDraftChange: (text: string) => void;
   capabilityLabel: string;
+  requiresStrongDisclaimer?: boolean;
 }
 
 export function ResponseArea({
@@ -139,6 +168,7 @@ export function ResponseArea({
   draftText,
   onDraftChange,
   capabilityLabel,
+  requiresStrongDisclaimer = false,
 }: ResponseAreaProps) {
   // Screen-reader announcement on completion.
   const srMessage =
@@ -195,6 +225,7 @@ export function ResponseArea({
         {/* Done — non-draft: formatted read-only text */}
         {state.status === "done" && !isDraft && (
           <div>
+            {requiresStrongDisclaimer && <StrongDisclaimer />}
             <WarningBanners warnings={state.warnings} />
             <ClinicalText text={state.text} />
           </div>

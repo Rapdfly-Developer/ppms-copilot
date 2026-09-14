@@ -10,6 +10,7 @@ const MVP_CAPABILITIES: Capability[] = [
   "IMPORTANT_CHANGES",
   "NOTE_ASSISTANCE",
   "FOLLOW_UP_SUMMARY",
+  "DIFFERENTIAL_DIAGNOSIS",
 ];
 
 // Short tab labels for the horizontal bar.
@@ -20,6 +21,7 @@ const TAB_LABELS: Partial<Record<Capability, string>> = {
   IMPORTANT_CHANGES: "Attention",
   NOTE_ASSISTANCE: "Draft Note",
   FOLLOW_UP_SUMMARY: "Follow-up",
+  DIFFERENTIAL_DIAGNOSIS: "Differential Dx",
 };
 
 interface CapabilitySelectorProps {

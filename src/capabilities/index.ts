@@ -1,4 +1,4 @@
-// Capability definitions — the 8 clinical AI actions the Copilot can perform.
+// Capability definitions — the 9 clinical AI actions the Copilot can perform.
 // Each capability declares exactly what data it needs, its token budget, and
 // which PPMS permission the doctor must hold.
 
@@ -10,6 +10,7 @@ export const CAPABILITIES = {
   IMPORTANT_CHANGES: "IMPORTANT_CHANGES",
   NOTE_ASSISTANCE: "NOTE_ASSISTANCE",
   FOLLOW_UP_SUMMARY: "FOLLOW_UP_SUMMARY",
+  DIFFERENTIAL_DIAGNOSIS: "DIFFERENTIAL_DIAGNOSIS",
   QUESTION: "QUESTION",
 } as const;
 
@@ -37,6 +38,9 @@ export type CapabilityConfig = {
   // Whether this capability produces a draft for doctor review and EMR insertion
   producesDraft: boolean;
   draftType?: "consultation_note" | "follow_up_summary";
+  // Whether this capability's output needs a more explicit safety disclaimer
+  // than the standard draft/summary framing (currently: DIFFERENTIAL_DIAGNOSIS only)
+  requiresStrongDisclaimer?: boolean;
   // Reasoning depth — used to select model tier and temperature
   reasoningEffort: "medium" | "high";
   // "fast" = COPILOT_FAST_MODEL, "reasoning" = COPILOT_REASONING_MODEL
@@ -120,6 +124,21 @@ export const CAPABILITY_CONFIG: Record<Capability, CapabilityConfig> = {
     permission: "ai.copilot.summarize",
     producesDraft: true,
     draftType: "follow_up_summary",
+    reasoningEffort: "high",
+    modelTier: "reasoning",
+  },
+  DIFFERENTIAL_DIAGNOSIS: {
+    label: "Differential Diagnosis",
+    description: "AI-generated list of possible diagnostic considerations for doctor review, based only on documented findings",
+    includes: { demographics: true, currentVisit: true, visitHistory: true, appointments: false, timeline: false },
+    visitLimit: 3,
+    maxTokens: 1400,
+    // Gated behind the same permission as NOTE_ASSISTANCE, not the broader
+    // ai.copilot.summarize — this generates interpretive clinical content,
+    // not a summary of what's already documented, so it gets the stricter gate.
+    permission: "ai.copilot.draft",
+    producesDraft: false,
+    requiresStrongDisclaimer: true,
     reasoningEffort: "high",
     modelTier: "reasoning",
   },

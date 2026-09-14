@@ -141,6 +141,134 @@ const WARNING_PATTERNS: { pattern: RegExp; warning: string }[] = [
 // NOTE_ASSISTANCE requires all four SOAP sections
 const SOAP_SECTIONS = ["Subjective:", "Objective:", "Assessment:", "Plan:"];
 
+// ── DIFFERENTIAL_DIAGNOSIS structural + citation requirements ─────────────────
+// The prompt (prompts/index.ts) locks the model to exactly this vocabulary and
+// this list format. The validator enforces that lock structurally — it does not
+// trust the model to have followed it.
+
+// Confidence vocabulary is deliberately limited to two non-committal labels.
+// "high" is never permitted — there is no cited-evidence tier that reaches it.
+const DIFFERENTIAL_CONFIDENCE_LABELS = ["low consideration", "moderate consideration"];
+
+const DIFFERENTIAL_HEADING = "## Possible Considerations for Review";
+
+const DIFFERENTIAL_NO_EVIDENCE_SENTENCE =
+  "The documented record does not contain sufficient findings to support any diagnostic considerations at this time.";
+
+// Certainty language the confidence vocabulary above explicitly forbids.
+// Separate from the generic UNSAFE_PATTERNS list because it's only unsafe in
+// the context of a differential — "confirmed" is fine when NOTE_ASSISTANCE
+// describes an already-documented diagnosis, but not here.
+const DIFFERENTIAL_CERTAINTY_PATTERNS: RegExp[] = [
+  /\bhigh(?:ly)?\s+(probability|likely|likelihood)\b/i,
+  /\bconfirmed\s+diagnos/i,
+  /\bcertain(ly)?\s+(has|is)\b/i,
+  /\bdefinite(ly)?\s+diagnos/i,
+];
+
+// Matches one ranked-list item line, e.g.:
+//   - **Anterior uveitis** — Moderate consideration (Source: V0 2024-06-15)
+// Group 1: condition name. Group 2: confidence label text. Group 3: citation
+// content (undefined when the line has no trailing parenthetical at all).
+const DIFFERENTIAL_ITEM_PATTERN =
+  /^-\s*\*\*(.+?)\*\*\s*[-—]\s*([^(\n]+?)\s*(?:\(([^)]*)\))?\s*$/gm;
+
+// Deliberately loose: matches ANY line that looks like it's trying to be a
+// ranked-list item — "- **" or "* **" followed by anything — regardless of
+// separator, confidence wording, or citation presence. Used only to COUNT
+// candidate lines, never to extract data from them.
+//
+// Why this exists: DIFFERENTIAL_ITEM_PATTERN requires an exact shape. A line
+// that drifts from it (wrong bullet character, en-dash instead of hyphen/em-dash,
+// confidence label wrapped in its own parens, etc.) simply produces no match —
+// it is invisible to items.length, not rejected by it. If even one OTHER line
+// in the same response parses cleanly, items.length > 0 and the "list is
+// empty" guard below never fires, so the drifted line — which may be uncited
+// or use forbidden confidence language — would otherwise reach the doctor
+// completely unchecked. Comparing the loose count to the strict count catches
+// exactly this: any candidate line that failed to parse strictly.
+const DIFFERENTIAL_LOOSE_CANDIDATE_PATTERN = /^[-*]\s*\*\*.+$/gm;
+
+function validateDifferentialDiagnosis(sanitised: string): ValidationResult | null {
+  // Returns null when structurally valid (caller proceeds to the shared warning
+  // pass); returns a failing ValidationResult otherwise.
+
+  // Certainty language is a hard reject regardless of list structure — the
+  // vocabulary is locked to "low"/"moderate" and nothing may imply more.
+  for (const pattern of DIFFERENTIAL_CERTAINTY_PATTERNS) {
+    if (pattern.test(sanitised)) {
+      return {
+        ok: false,
+        reason: "Contains diagnostic certainty language outside the permitted confidence vocabulary",
+        code: "RESPONSE_UNSAFE",
+      };
+    }
+  }
+
+  if (!sanitised.includes(DIFFERENTIAL_HEADING)) {
+    return {
+      ok: false,
+      reason: `Response missing required "${DIFFERENTIAL_HEADING}" section`,
+      code: "DIFFERENTIAL_STRUCTURE_INVALID",
+    };
+  }
+
+  const noEvidence = sanitised.includes(DIFFERENTIAL_NO_EVIDENCE_SENTENCE);
+  const items = [...sanitised.matchAll(DIFFERENTIAL_ITEM_PATTERN)];
+  const looseCandidates = [...sanitised.matchAll(DIFFERENTIAL_LOOSE_CANDIDATE_PATTERN)];
+
+  // A loose candidate count higher than the strict parse count means at least
+  // one list-item-shaped line failed to match the required format — reject
+  // the whole response rather than silently validating only the subset that
+  // happened to parse cleanly. Fail closed on ambiguity, not open.
+  if (looseCandidates.length > items.length) {
+    return {
+      ok: false,
+      reason: "Response contains a list item that does not match the required ranked-list format (check separator, confidence label, or citation)",
+      code: "DIFFERENTIAL_STRUCTURE_INVALID",
+    };
+  }
+
+  // No ranked items: only acceptable if the model used the exact fixed
+  // insufficient-evidence sentence instead of inventing an unsupported one.
+  if (items.length === 0) {
+    if (noEvidence) return null;
+    return {
+      ok: false,
+      reason:
+        "Response is not a ranked list of considerations with confidence labels and citations, " +
+        "and does not contain the required insufficient-evidence sentence",
+      code: "DIFFERENTIAL_STRUCTURE_INVALID",
+    };
+  }
+
+  // A single well-formed item is a fully valid response — no minimum count.
+  for (const match of items) {
+    const [, name, confidenceRaw, citation] = match;
+    const label = confidenceRaw.trim().toLowerCase();
+
+    if (!DIFFERENTIAL_CONFIDENCE_LABELS.includes(label)) {
+      return {
+        ok: false,
+        reason: `Consideration "${name.trim()}" uses a confidence label outside "Low consideration" / "Moderate consideration"`,
+        code: "DIFFERENTIAL_STRUCTURE_INVALID",
+      };
+    }
+
+    // A citation must be a real evidence reference, not just any parenthetical.
+    const hasCitation = !!citation && /\b(source|finding)\b/i.test(citation);
+    if (!hasCitation) {
+      return {
+        ok: false,
+        reason: `Consideration "${name.trim()}" has no cited evidence reference`,
+        code: "DIFFERENTIAL_UNCITED",
+      };
+    }
+  }
+
+  return null;
+}
+
 export type ValidationResult =
   | { ok: true; warnings: string[] }
   | { ok: false; reason: string; code: string };
@@ -184,6 +312,13 @@ export function validateResponse(
         code: "NOTE_INCOMPLETE",
       };
     }
+  }
+
+  // 4b. DIFFERENTIAL_DIAGNOSIS: ranked list, locked confidence vocabulary,
+  // and a citation on every item (or the fixed insufficient-evidence sentence).
+  if (capability === "DIFFERENTIAL_DIAGNOSIS") {
+    const result = validateDifferentialDiagnosis(sanitised);
+    if (result) return result;
   }
 
   // 5. Warning patterns (soft — response allowed through with annotations)
