@@ -51,6 +51,37 @@ function ClinicalText({ text }: { text: string }) {
           );
         }
 
+        // Differential-diagnosis consideration block fields: a standalone
+        // bold line (no colon) is the diagnosis name; "Confidence:" and
+        // "Source:" are their own lines per the DIFFERENTIAL_DIAGNOSIS
+        // prompt/validator format (validation/response.ts). No other
+        // capability produces these as standalone lines, so this is safe
+        // to key off globally rather than threading capability through here.
+        if (trimmed.match(/^\*\*[^*]+\*\*$/)) {
+          const name = trimmed.slice(2, -2);
+          return (
+            <p key={i} className="font-semibold text-slate-900 mt-3">
+              {name}
+            </p>
+          );
+        }
+
+        if (trimmed.match(/^Confidence:\s*/i)) {
+          return (
+            <p key={i} className="text-xs text-slate-500 mt-0.5">
+              {trimmed}
+            </p>
+          );
+        }
+
+        if (trimmed.match(/^Source:\s*/i)) {
+          return (
+            <p key={i} className="text-xs text-slate-400 italic mt-0.5 mb-2">
+              {trimmed}
+            </p>
+          );
+        }
+
         if (trimmed.match(/^[-•*]\s/)) {
           return (
             <div key={i} className="flex gap-2 pl-1">

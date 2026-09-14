@@ -142,14 +142,21 @@ const WARNING_PATTERNS: { pattern: RegExp; warning: string }[] = [
 const SOAP_SECTIONS = ["Subjective:", "Objective:", "Assessment:", "Plan:"];
 
 // ── DIFFERENTIAL_DIAGNOSIS structural + confidence-vocabulary requirements ────
-// The prompt (prompts/index.ts) locks the model to exactly this vocabulary and
-// this list format. The validator enforces that lock structurally — it does not
-// trust the model to have followed it. Per-item citation is NOT enforced here
-// (product decision — see the per-item loop below for why).
+// The prompt (prompts/index.ts) locks the model to a fixed multi-line block
+// format — name, reason, confidence, optional source — one block per
+// consideration, blank line between blocks. The validator enforces that lock
+// field-by-field per block; it does not trust the model to have followed it.
+// Per-item citation is NOT required (product decision — see parseConsiderationBlock).
+//
+// This replaces an earlier single-line "- **Name** — confidence (citation)"
+// regex format, which needed hardening twice against realistic model drift
+// (a citation-bypass bug, then dropped/split honesty-disclosure punctuation).
+// The multi-line block format sidesteps both failure classes: each field is
+// its own line, so there is no shared trailing clause for drift to hide in.
 
 // Confidence vocabulary is deliberately limited to two non-committal labels.
 // "high" is never permitted — there is no cited-evidence tier that reaches it.
-const DIFFERENTIAL_CONFIDENCE_LABELS = ["low consideration", "moderate consideration"];
+const DIFFERENTIAL_CONFIDENCE_LABELS = ["low", "moderate"];
 
 const DIFFERENTIAL_HEADING = "## Possible Considerations for Review";
 
@@ -167,28 +174,76 @@ const DIFFERENTIAL_CERTAINTY_PATTERNS: RegExp[] = [
   /\bdefinite(ly)?\s+diagnos/i,
 ];
 
-// Matches one ranked-list item line, e.g.:
-//   - **Anterior uveitis** — Moderate consideration (Source: V0 2024-06-15)
-// Group 1: condition name. Group 2: confidence label text. Group 3: trailing
-// parenthetical content (citation or otherwise) — captured but not validated.
-const DIFFERENTIAL_ITEM_PATTERN =
-  /^-\s*\*\*(.+?)\*\*\s*[-—]\s*([^(\n]+?)\s*(?:\(([^)]*)\))?\s*$/gm;
+// Isolates the considerations list from the rest of the response: everything
+// after the required heading, up to the next "## " heading (e.g. Documentation
+// Gaps) or the "---" disclaimer separator, whichever comes first.
+function extractConsiderationsSection(text: string): string {
+  const headingIndex = text.indexOf(DIFFERENTIAL_HEADING);
+  if (headingIndex === -1) return "";
+  const afterHeading = text.slice(headingIndex + DIFFERENTIAL_HEADING.length);
 
-// Deliberately loose: matches ANY line that looks like it's trying to be a
-// ranked-list item — "- **" or "* **" followed by anything — regardless of
-// separator, confidence wording, or citation presence. Used only to COUNT
-// candidate lines, never to extract data from them.
-//
-// Why this exists: DIFFERENTIAL_ITEM_PATTERN requires an exact shape. A line
-// that drifts from it (wrong bullet character, en-dash instead of hyphen/em-dash,
-// confidence label wrapped in its own parens, etc.) simply produces no match —
-// it is invisible to items.length, not rejected by it. If even one OTHER line
-// in the same response parses cleanly, items.length > 0 and the "list is
-// empty" guard below never fires, so the drifted line — which may be uncited
-// or use forbidden confidence language — would otherwise reach the doctor
-// completely unchecked. Comparing the loose count to the strict count catches
-// exactly this: any candidate line that failed to parse strictly.
-const DIFFERENTIAL_LOOSE_CANDIDATE_PATTERN = /^[-*]\s*\*\*.+$/gm;
+  let endIndex = afterHeading.length;
+  const nextHeadingMatch = afterHeading.match(/\n##\s/);
+  if (nextHeadingMatch?.index !== undefined) {
+    endIndex = Math.min(endIndex, nextHeadingMatch.index);
+  }
+  const separatorMatch = afterHeading.match(/\n---\s*\n/);
+  if (separatorMatch?.index !== undefined) {
+    endIndex = Math.min(endIndex, separatorMatch.index);
+  }
+
+  return afterHeading.slice(0, endIndex).trim();
+}
+
+// Parses one consideration block against the exact field order the prompt
+// specifies: bold name line, reason line(s), "Confidence: Low|Moderate" line,
+// and an optional "Source: ..." line. Returns null for anything that doesn't
+// match — including missing fields, wrong field order, or two blocks that ran
+// together without a blank line between them. This is the fail-closed
+// replacement for the old loose-candidate cross-check: because every block is
+// parsed field-by-field, there is no "well-formed subset" for a malformed
+// block to hide behind.
+function parseConsiderationBlock(block: string): { name: string; confidence: string } | null {
+  const lines = block.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
+  if (lines.length < 3) return null;
+
+  const nameMatch = lines[0].match(/^\*\*(.+)\*\*$/);
+  if (!nameMatch || !nameMatch[1].trim()) return null;
+
+  // The reason is "one short, precise line" per the prompt, but the model can
+  // still insert a hard newline mid-sentence on a long reason (observed:
+  // picking up the one-field-per-line rhythm of the surrounding structure).
+  // Rather than assuming the reason is exactly lines[1], scan forward for the
+  // first line that matches the Confidence pattern and treat everything
+  // between the name and that line — however many lines — as the reason.
+  // This must find a genuine Confidence line to anchor on; if none exists,
+  // the block is rejected exactly as before (missing/malformed Confidence).
+  const confidenceIndex = lines.findIndex(
+    (l, idx) => idx >= 1 && /^Confidence:\s*(Low|Moderate)\s*$/i.test(l),
+  );
+  if (confidenceIndex === -1) return null;
+
+  const reasonLines = lines.slice(1, confidenceIndex);
+  if (reasonLines.length === 0) return null;
+  // A reason "line" that itself looks like a drifted Confidence/Source field
+  // is genuinely malformed, not a natural wrap — still reject it.
+  if (reasonLines.some((l) => /^Confidence:/i.test(l) || /^Source:/i.test(l))) return null;
+
+  const confidenceMatch = lines[confidenceIndex].match(/^Confidence:\s*(Low|Moderate)\s*$/i)!;
+
+  // At most one line may follow Confidence (the optional Source line). More
+  // than one means either a second, unseparated block ran on directly after
+  // this one, or a genuinely malformed trailer — both rejected the same way
+  // the old length bound rejected them.
+  const trailing = lines.slice(confidenceIndex + 1);
+  if (trailing.length > 1) return null;
+  if (trailing.length === 1) {
+    const sourceMatch = trailing[0].match(/^Source:\s*(.+)$/i);
+    if (!sourceMatch || !sourceMatch[1].trim()) return null;
+  }
+
+  return { name: nameMatch[1].trim(), confidence: confidenceMatch[1].toLowerCase() };
+}
 
 function validateDifferentialDiagnosis(sanitised: string): ValidationResult | null {
   // Returns null when structurally valid (caller proceeds to the shared warning
@@ -214,51 +269,49 @@ function validateDifferentialDiagnosis(sanitised: string): ValidationResult | nu
     };
   }
 
-  const noEvidence = sanitised.includes(DIFFERENTIAL_NO_EVIDENCE_SENTENCE);
-  const items = [...sanitised.matchAll(DIFFERENTIAL_ITEM_PATTERN)];
-  const looseCandidates = [...sanitised.matchAll(DIFFERENTIAL_LOOSE_CANDIDATE_PATTERN)];
+  const section = extractConsiderationsSection(sanitised);
+  const blocks = section.split(/\n\s*\n/).map((b) => b.trim()).filter(Boolean);
 
-  // A loose candidate count higher than the strict parse count means at least
-  // one list-item-shaped line failed to match the required format — reject
-  // the whole response rather than silently validating only the subset that
-  // happened to parse cleanly. Fail closed on ambiguity, not open.
-  if (looseCandidates.length > items.length) {
+  if (blocks.length === 0) {
     return {
       ok: false,
-      reason: "Response contains a list item that does not match the required ranked-list format (check separator or confidence label)",
+      reason: "Response contains no diagnostic considerations and no insufficient-evidence sentence",
       code: "DIFFERENTIAL_STRUCTURE_INVALID",
     };
   }
 
-  // No ranked items: only acceptable if the model used the exact fixed
-  // insufficient-evidence sentence instead of inventing an unsupported one.
-  if (items.length === 0) {
-    if (noEvidence) return null;
-    return {
-      ok: false,
-      reason:
-        "Response is not a ranked list of considerations with confidence labels, " +
-        "and does not contain the required insufficient-evidence sentence",
-      code: "DIFFERENTIAL_STRUCTURE_INVALID",
-    };
+  // Zero-item case: only acceptable if the entire section is exactly the
+  // fixed insufficient-evidence sentence — nothing else alongside it. A
+  // second block (even a malformed fragment) alongside the sentence must
+  // still fail closed rather than being masked by the valid refusal.
+  if (blocks.length === 1 && blocks[0] === DIFFERENTIAL_NO_EVIDENCE_SENTENCE) {
+    return null;
   }
 
-  // A single well-formed item is a fully valid response — no minimum count.
-  // Citation is deliberately NOT required here (product decision: always
-  // attempt a best-effort list from whatever documented symptoms/history
-  // exist, rather than refusing when evidence is thin). The prompt instructs
-  // the model to disclose when a consideration isn't tied to a specific
-  // documented finding rather than fabricating a citation, but that
-  // disclosure is a prompt-level instruction, not independently verified
-  // here — only structure and confidence vocabulary are still enforced.
-  for (const match of items) {
-    const [, name, confidenceRaw] = match;
-    const label = confidenceRaw.trim().toLowerCase();
-
-    if (!DIFFERENTIAL_CONFIDENCE_LABELS.includes(label)) {
+  // A single well-formed block is a fully valid response — no minimum count.
+  // Citation (the Source line) is deliberately NOT required (product
+  // decision: always attempt a best-effort list from whatever documented
+  // symptoms/history exist, rather than refusing when evidence is thin).
+  for (const block of blocks) {
+    const parsed = parseConsiderationBlock(block);
+    if (!parsed) {
       return {
         ok: false,
-        reason: `Consideration "${name.trim()}" uses a confidence label outside "Low consideration" / "Moderate consideration"`,
+        reason:
+          "Response contains a consideration block that does not match the required " +
+          "name / reason / confidence format",
+        code: "DIFFERENTIAL_STRUCTURE_INVALID",
+      };
+    }
+
+    // parseConsiderationBlock's Confidence regex already guarantees this can
+    // only be "low" or "moderate" — kept as defense-in-depth (belt-and-braces
+    // against a future edit loosening that regex without updating this
+    // alongside it), not as the primary enforcement.
+    if (!DIFFERENTIAL_CONFIDENCE_LABELS.includes(parsed.confidence)) {
+      return {
+        ok: false,
+        reason: `Consideration "${parsed.name}" uses a confidence value outside "Low" / "Moderate"`,
         code: "DIFFERENTIAL_STRUCTURE_INVALID",
       };
     }

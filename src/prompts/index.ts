@@ -317,15 +317,27 @@ Do not imply access to results you do not have.
 Always attempt at least one possible consideration from whatever documented symptoms, chief complaint, or history exist — however minimal. Do not refuse to produce a list merely because the documented evidence is thin; reason generally from the limited symptoms described rather than declining. Only use the exact fallback sentence below in the rare case where the record contains no complaint, symptoms, or history at all to reason from.
 
 ## Possible Considerations for Review
-List each consideration as its own block, ordered from most to least supported by the documented record. For each item, use one of these two forms:
-- **[Condition name]** — [Low consideration / Moderate consideration] (Source: [Finding reference or Vn date])
-  **Supporting documented evidence:** [the specific documented symptom, finding, or history item this is based on]
-- **[Condition name]** — [Low consideration / Moderate consideration] (Not tied to a specific documented finding — based on general clinical reasoning from limited symptoms)
-  **Supporting documented evidence:** [describe the general symptom pattern this is drawn from]
+List each consideration as its own block, ordered from most to least supported by the documented record. Use EXACTLY this structure for every block, in this exact line order, with a blank line between blocks and no blank line within a block:
+
+**[Diagnosis name]**
+[Reason it's suggested — one short, precise line]
+Confidence: [Low / Moderate]
+Source: [documented finding reference or visit date this is based on — OMIT THIS ENTIRE LINE if the consideration is based on general clinical reasoning rather than a specific documented finding; never write a placeholder such as "Source: none" or "Source: general reasoning" in its place]
+
+For example, given a record documenting photophobia and eye pain at V0, and a general pattern of gradual blurring not tied to any specific documented finding:
+
+**Anterior uveitis**
+Documented photophobia and eye pain are consistent with anterior segment inflammation.
+Confidence: Moderate
+Source: V0 2024-06-15
+
+**Early cataract changes**
+Gradual blurring of vision is a general pattern consistent with early lens changes.
+Confidence: Low
 
 Rules for this list:
-- Use ONLY "Low consideration" or "Moderate consideration" as the confidence label. NEVER use "high probability," "likely," "confirmed," "definite," or any other language implying certainty — regardless of how the item is grounded.
-- Cite the documented finding when one exists. If a consideration is instead based on general clinical reasoning from limited symptoms rather than a specific documented item, say so explicitly using the second form above instead of citing — never fabricate a citation that isn't genuinely there.
+- Use ONLY "Low" or "Moderate" as the value on the Confidence line. NEVER use "high," "likely," "confirmed," "definite," or any other language implying certainty — regardless of how the item is grounded.
+- Include the Source line only when a specific documented finding, visit, or history item genuinely supports the consideration. If the consideration is instead based on general clinical reasoning from limited symptoms, omit the Source line entirely — never fabricate a citation that isn't genuinely there, and never write a fallback phrase in its place.
 - Do not pad the list, but do not leave it empty either — always produce at least one consideration when the record documents any complaint, symptom, or history to reason from.
 - Only if the record contains no complaint, symptoms, or history at all, write this exact sentence and nothing else in this section: "The documented record does not contain sufficient findings to support any diagnostic considerations at this time."
 

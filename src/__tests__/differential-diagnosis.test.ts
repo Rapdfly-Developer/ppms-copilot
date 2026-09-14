@@ -5,16 +5,16 @@
 // for every other capability — not the validator in isolation — so this also
 // proves the prompt/service/validator wiring for this capability stays intact.
 //
-// Every scenario here was manually verified once as a disposable scratch
-// test during development (including the mixed-drift citation-bypass bug we
-// found and its fix); this file makes each of them permanent.
-//
-// Product decision update: DIFFERENTIAL_DIAGNOSIS now always attempts a
-// best-effort list from whatever documented symptoms/history exist, rather
-// than refusing when evidence is thin — citation is no longer required per
-// item (DIFFERENTIAL_UNCITED was removed from the validator). Confidence
-// vocabulary, structural/loose-candidate checks, and the universal
-// certainty-language and prescriptive-language hard-rejects are unchanged.
+// Output format: one block per consideration —
+//   **[Diagnosis name]**
+//   [Reason — one line]
+//   Confidence: [Low / Moderate]
+//   Source: [optional — omitted entirely when not tied to a specific finding]
+// — blank line between blocks. Replaces an earlier single-line
+// "- **Name** — confidence (citation)" format, which needed hardening twice
+// against realistic model drift; this multi-line block format is parsed and
+// validated field-by-field (see validateDifferentialDiagnosis in
+// validation/response.ts) rather than via a single line-matching regex.
 
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { streamCopilotResponse } from "@/service/copilot";
@@ -88,101 +88,134 @@ const DISCLAIMER =
   "responsible for the final diagnostic decision and must not act on this output without " +
   "independent clinical assessment.";
 
-// 1. Single cited item
-const SINGLE_CITED_ITEM = `## Possible Considerations for Review
-- **Anterior uveitis** — Moderate consideration (Source: V0 2024-06-15)
-  **Supporting documented evidence:** Documented photophobia and eye pain at V0.
+// 1. Well-formed block WITH a Source (citation) line.
+const WELL_FORMED_WITH_CITATION = `## Possible Considerations for Review
+**Anterior uveitis**
+Documented photophobia and eye pain are consistent with anterior segment inflammation.
+Confidence: Moderate
+Source: V0 2024-06-15
 
 ---
 ${DISCLAIMER}`;
 
-// 2. Multi-item list, all cited
-const MULTI_ITEM_ALL_CITED = `## Possible Considerations for Review
-- **Anterior uveitis** — Moderate consideration (Source: V0 2024-06-15)
-  **Supporting documented evidence:** Documented photophobia and eye pain at V0.
-- **Episcleritis** — Low consideration (Finding 2, Source: V1 2023-12-10 → V0 2024-06-15)
-  **Supporting documented evidence:** Documented redness without discharge.
+// 2. Well-formed block WITHOUT a Source line — general clinical reasoning,
+// not tied to a specific documented finding. Citation is optional by design.
+const WELL_FORMED_WITHOUT_CITATION = `## Possible Considerations for Review
+**Early cataract changes**
+Gradual blurring of vision is a general pattern consistent with early lens changes.
+Confidence: Low
 
 ---
 ${DISCLAIMER}`;
 
-// 3. Item missing citation entirely — no longer disqualifying (product decision)
-const ITEM_MISSING_CITATION = `## Possible Considerations for Review
-- **Anterior uveitis** — Moderate consideration
-  **Supporting documented evidence:** Documented photophobia.
+// Multi-item list mixing a cited and an uncited block — both forms in one response.
+const MULTI_ITEM_MIXED = `## Possible Considerations for Review
+**Anterior uveitis**
+Documented photophobia and eye pain are consistent with anterior segment inflammation.
+Confidence: Moderate
+Source: V0 2024-06-15
+
+**Early cataract changes**
+Gradual blurring of vision is a general pattern consistent with early lens changes.
+Confidence: Low
 
 ---
 ${DISCLAIMER}`;
 
-// 4. Vague non-citation parenthetical — citation *content* was never
-// independently validated even before this change (any non-empty parenthetical
-// containing "source"/"finding" passed); now citation presence itself is also
-// irrelevant, so this passes too.
-const NON_CITATION_PARENTHETICAL = `## Possible Considerations for Review
-- **Anterior uveitis** — Moderate consideration (likely)
-  **Supporting documented evidence:** Documented photophobia.
+// 3. Missing reason line — Confidence line comes directly after the name.
+const MISSING_REASON_LINE = `## Possible Considerations for Review
+**Anterior uveitis**
+Confidence: Moderate
+Source: V0 2024-06-15
 
 ---
 ${DISCLAIMER}`;
 
-// 11. Mix of a properly cited item and an honestly-uncited-but-labeled item —
-// the new prompt's second permitted item form for weak grounding.
-const MIXED_CITED_AND_HONEST_UNCITED = `## Possible Considerations for Review
-- **Anterior uveitis** — Moderate consideration (Source: V0 2024-06-15)
-  **Supporting documented evidence:** Documented photophobia and eye pain at V0.
-- **Early lens changes** — Low consideration (Not tied to a specific documented finding — based on general clinical reasoning from limited symptoms)
-  **Supporting documented evidence:** Gradual blurring of vision reported, consistent with early lens changes, though not specifically documented as such.
+// 4. Missing Confidence line — Source line comes directly after the reason.
+const MISSING_CONFIDENCE_LINE = `## Possible Considerations for Review
+**Anterior uveitis**
+Documented photophobia and eye pain reported.
+Source: V0 2024-06-15
 
 ---
 ${DISCLAIMER}`;
 
-// 5. Disallowed confidence label implying certainty
-const DISALLOWED_CONFIDENCE_LABEL = `## Possible Considerations for Review
-- **Anterior uveitis** — High probability (Source: V0 2024-06-15)
-  **Supporting documented evidence:** Documented photophobia.
+// 5. Confidence line present but with a value outside "Low" / "Moderate".
+const INVALID_CONFIDENCE_VALUE = `## Possible Considerations for Review
+**Anterior uveitis**
+Documented photophobia and eye pain reported.
+Confidence: Medium
 
 ---
 ${DISCLAIMER}`;
 
-// 6. Exact insufficient-evidence sentence, zero items
+// 6. Certainty language — hard-rejected regardless of block structure.
+const CERTAINTY_LANGUAGE = `## Possible Considerations for Review
+**Anterior uveitis**
+This is a confirmed diagnosis based on the documented findings.
+Confidence: Moderate
+Source: V0 2024-06-15
+
+---
+${DISCLAIMER}`;
+
+// 7. Prescriptive/treatment language mixed into an otherwise well-formed response.
+const PRESCRIPTIVE_LANGUAGE_MIXED_IN = `## Possible Considerations for Review
+**Anterior uveitis**
+Documented photophobia and eye pain reported.
+Confidence: Moderate
+Source: V0 2024-06-15
+
+I recommend starting topical steroids immediately.
+
+---
+${DISCLAIMER}`;
+
+// 8. Malformed/drifted block — two considerations run together without a
+// blank line between them, so they parse as a single 6-line block instead
+// of two valid 4-line blocks. Rejected by the block length bound.
+const MALFORMED_DRIFTED_BLOCK = `## Possible Considerations for Review
+**Anterior uveitis**
+Documented photophobia and eye pain reported.
+Confidence: Moderate
+**Episcleritis**
+Documented redness without discharge.
+Confidence: Low
+
+---
+${DISCLAIMER}`;
+
+// 9. Missing the required heading entirely.
+const MISSING_HEADING =
+  "Some free text response describing possible considerations informally, without using " +
+  "the required structured heading or block format the prompt specifies at all.";
+
+// 10. Exact insufficient-evidence sentence, zero blocks.
 const NO_EVIDENCE_SENTENCE = `## Possible Considerations for Review
 The documented record does not contain sufficient findings to support any diagnostic considerations at this time.
 
 ---
 ${DISCLAIMER}`;
 
-// 7. Missing the required heading entirely
-const MISSING_HEADING =
-  "Some free text response describing possible considerations informally, without using " +
-  "the required structured heading or list format the prompt specifies at all.";
-
-// 8. Prescriptive/treatment language mixed into an otherwise well-formed response
-const PRESCRIPTIVE_LANGUAGE_MIXED_IN = `## Possible Considerations for Review
-- **Anterior uveitis** — Moderate consideration (Source: V0 2024-06-15)
-  **Supporting documented evidence:** Documented photophobia.
-I recommend starting topical steroids immediately.
-
----
-${DISCLAIMER}`;
-
-// 9. Mixed well-formed + drifted item — the citation-bypass bug we found and fixed.
-// The second item uses an en-dash (not the required hyphen/em-dash) and has no
-// citation. Without the loose-candidate cross-check, the first item alone would
-// make items.length > 0 and this uncited, drifted item would slip through unseen.
-const MIXED_WELL_FORMED_AND_DRIFTED_ITEM = `## Possible Considerations for Review
-- **Anterior uveitis** — Moderate consideration (Source: V0 2024-06-15)
-  **Supporting documented evidence:** Documented photophobia.
-- **Episcleritis** – Moderate consideration, given the documented redness pattern
-  **Supporting documented evidence:** Documented redness.
+// 12. A well-intentioned reason that wraps across two lines with a hard
+// newline (no blank line before Confidence) — not a separate field, just a
+// long sentence that broke mid-clause. Must still pass: the reason is
+// reconstructed from every line before the Confidence line, however many.
+const WRAPPED_REASON_NO_SOURCE = `## Possible Considerations for Review
+**Anterior uveitis**
+Documented photophobia and eye pain are consistent with
+anterior segment inflammation, warranting consideration.
+Confidence: Moderate
 
 ---
 ${DISCLAIMER}`;
 
-// 10. Abandoned/malformed fragment alongside the exact refusal sentence — the
-// loose-candidate check must fire BEFORE the "noEvidence short-circuits" path,
-// so a stray unclosed list item can't hide behind a valid refusal sentence.
+// 11. An abandoned/malformed fragment alongside the exact refusal sentence —
+// the fragment must not be able to hide behind a valid refusal elsewhere in
+// the same section. Fail closed rather than letting noEvidence short-circuit.
 const ABANDONED_FRAGMENT_WITH_REFUSAL_SENTENCE = `## Possible Considerations for Review
-- **Possible glau
+**Possible glau
+
 The documented record does not contain sufficient findings to support any diagnostic considerations at this time.
 
 ---
@@ -206,8 +239,8 @@ afterEach(() => {
 });
 
 describe("DIFFERENTIAL_DIAGNOSIS capability", () => {
-  it("1. single cited item passes, with correct done-frame meta", async () => {
-    setProvider(makeMockProvider(SINGLE_CITED_ITEM));
+  it("1. well-formed block WITH a citation (Source line) passes, with correct done-frame meta", async () => {
+    setProvider(makeMockProvider(WELL_FORMED_WITH_CITATION));
 
     const frames = await collectFrames({ capability: "DIFFERENTIAL_DIAGNOSIS" }, `Bearer ${FIXTURE_TOKEN}`);
     const done = frames.find((f) => f.type === "done");
@@ -221,8 +254,8 @@ describe("DIFFERENTIAL_DIAGNOSIS capability", () => {
     }
   });
 
-  it("2. multi-item list, all items cited, passes", async () => {
-    setProvider(makeMockProvider(MULTI_ITEM_ALL_CITED));
+  it("2. well-formed block WITHOUT a citation (no Source line) also passes — citation is optional", async () => {
+    setProvider(makeMockProvider(WELL_FORMED_WITHOUT_CITATION));
 
     const frames = await collectFrames({ capability: "DIFFERENTIAL_DIAGNOSIS" }, `Bearer ${FIXTURE_TOKEN}`);
 
@@ -230,8 +263,8 @@ describe("DIFFERENTIAL_DIAGNOSIS capability", () => {
     expect(frames.some((f) => f.type === "error")).toBe(false);
   });
 
-  it("3. item missing a citation now passes — citation is no longer disqualifying", async () => {
-    setProvider(makeMockProvider(ITEM_MISSING_CITATION));
+  it("multi-item list mixing a cited and an uncited block passes", async () => {
+    setProvider(makeMockProvider(MULTI_ITEM_MIXED));
 
     const frames = await collectFrames({ capability: "DIFFERENTIAL_DIAGNOSIS" }, `Bearer ${FIXTURE_TOKEN}`);
 
@@ -239,35 +272,8 @@ describe("DIFFERENTIAL_DIAGNOSIS capability", () => {
     expect(frames.some((f) => f.type === "error")).toBe(false);
   });
 
-  it("4. a vague parenthetical like \"(likely)\" also passes now — citation content is not validated", async () => {
-    setProvider(makeMockProvider(NON_CITATION_PARENTHETICAL));
-
-    const frames = await collectFrames({ capability: "DIFFERENTIAL_DIAGNOSIS" }, `Bearer ${FIXTURE_TOKEN}`);
-
-    expect(frames.find((f) => f.type === "done")).toBeDefined();
-    expect(frames.some((f) => f.type === "error")).toBe(false);
-  });
-
-  it("5. a disallowed confidence label (\"High probability\") is rejected as RESPONSE_UNSAFE", async () => {
-    setProvider(makeMockProvider(DISALLOWED_CONFIDENCE_LABEL));
-
-    const frames = await collectFrames({ capability: "DIFFERENTIAL_DIAGNOSIS" }, `Bearer ${FIXTURE_TOKEN}`);
-
-    expect(frames.find((f) => f.type === "done")).toBeUndefined();
-    expect(errorCodeOf(frames)).toBe("RESPONSE_UNSAFE");
-  });
-
-  it("6. the exact insufficient-evidence sentence with zero items passes", async () => {
-    setProvider(makeMockProvider(NO_EVIDENCE_SENTENCE));
-
-    const frames = await collectFrames({ capability: "DIFFERENTIAL_DIAGNOSIS" }, `Bearer ${FIXTURE_TOKEN}`);
-
-    expect(frames.find((f) => f.type === "done")).toBeDefined();
-    expect(frames.some((f) => f.type === "error")).toBe(false);
-  });
-
-  it("7. missing the required heading is rejected as DIFFERENTIAL_STRUCTURE_INVALID", async () => {
-    setProvider(makeMockProvider(MISSING_HEADING));
+  it("3. a block missing its reason line is rejected as DIFFERENTIAL_STRUCTURE_INVALID", async () => {
+    setProvider(makeMockProvider(MISSING_REASON_LINE));
 
     const frames = await collectFrames({ capability: "DIFFERENTIAL_DIAGNOSIS" }, `Bearer ${FIXTURE_TOKEN}`);
 
@@ -275,7 +281,34 @@ describe("DIFFERENTIAL_DIAGNOSIS capability", () => {
     expect(errorCodeOf(frames)).toBe("DIFFERENTIAL_STRUCTURE_INVALID");
   });
 
-  it("8. prescriptive/treatment language mixed in is still rejected (universal check, unchanged)", async () => {
+  it("4. a block missing its Confidence line is rejected as DIFFERENTIAL_STRUCTURE_INVALID", async () => {
+    setProvider(makeMockProvider(MISSING_CONFIDENCE_LINE));
+
+    const frames = await collectFrames({ capability: "DIFFERENTIAL_DIAGNOSIS" }, `Bearer ${FIXTURE_TOKEN}`);
+
+    expect(frames.find((f) => f.type === "done")).toBeUndefined();
+    expect(errorCodeOf(frames)).toBe("DIFFERENTIAL_STRUCTURE_INVALID");
+  });
+
+  it("5. a Confidence value outside Low/Moderate is rejected as DIFFERENTIAL_STRUCTURE_INVALID", async () => {
+    setProvider(makeMockProvider(INVALID_CONFIDENCE_VALUE));
+
+    const frames = await collectFrames({ capability: "DIFFERENTIAL_DIAGNOSIS" }, `Bearer ${FIXTURE_TOKEN}`);
+
+    expect(frames.find((f) => f.type === "done")).toBeUndefined();
+    expect(errorCodeOf(frames)).toBe("DIFFERENTIAL_STRUCTURE_INVALID");
+  });
+
+  it("6. certainty language is rejected as RESPONSE_UNSAFE regardless of block structure", async () => {
+    setProvider(makeMockProvider(CERTAINTY_LANGUAGE));
+
+    const frames = await collectFrames({ capability: "DIFFERENTIAL_DIAGNOSIS" }, `Bearer ${FIXTURE_TOKEN}`);
+
+    expect(frames.find((f) => f.type === "done")).toBeUndefined();
+    expect(errorCodeOf(frames)).toBe("RESPONSE_UNSAFE");
+  });
+
+  it("7. prescriptive/treatment language mixed in is rejected as RESPONSE_UNSAFE (universal check, unchanged)", async () => {
     setProvider(makeMockProvider(PRESCRIPTIVE_LANGUAGE_MIXED_IN));
 
     const frames = await collectFrames({ capability: "DIFFERENTIAL_DIAGNOSIS" }, `Bearer ${FIXTURE_TOKEN}`);
@@ -284,8 +317,8 @@ describe("DIFFERENTIAL_DIAGNOSIS capability", () => {
     expect(errorCodeOf(frames)).toBe("RESPONSE_UNSAFE");
   });
 
-  it("9. a mixed well-formed + drifted item is rejected via the loose-candidate cross-check", async () => {
-    setProvider(makeMockProvider(MIXED_WELL_FORMED_AND_DRIFTED_ITEM));
+  it("8. a malformed/drifted block (two considerations run together) is rejected as DIFFERENTIAL_STRUCTURE_INVALID", async () => {
+    setProvider(makeMockProvider(MALFORMED_DRIFTED_BLOCK));
 
     const frames = await collectFrames({ capability: "DIFFERENTIAL_DIAGNOSIS" }, `Bearer ${FIXTURE_TOKEN}`);
 
@@ -293,7 +326,25 @@ describe("DIFFERENTIAL_DIAGNOSIS capability", () => {
     expect(errorCodeOf(frames)).toBe("DIFFERENTIAL_STRUCTURE_INVALID");
   });
 
-  it("10. an abandoned fragment alongside the refusal sentence is rejected — noEvidence does not short-circuit it", async () => {
+  it("9. missing the required heading is rejected as DIFFERENTIAL_STRUCTURE_INVALID", async () => {
+    setProvider(makeMockProvider(MISSING_HEADING));
+
+    const frames = await collectFrames({ capability: "DIFFERENTIAL_DIAGNOSIS" }, `Bearer ${FIXTURE_TOKEN}`);
+
+    expect(frames.find((f) => f.type === "done")).toBeUndefined();
+    expect(errorCodeOf(frames)).toBe("DIFFERENTIAL_STRUCTURE_INVALID");
+  });
+
+  it("10. the exact insufficient-evidence sentence with zero blocks passes", async () => {
+    setProvider(makeMockProvider(NO_EVIDENCE_SENTENCE));
+
+    const frames = await collectFrames({ capability: "DIFFERENTIAL_DIAGNOSIS" }, `Bearer ${FIXTURE_TOKEN}`);
+
+    expect(frames.find((f) => f.type === "done")).toBeDefined();
+    expect(frames.some((f) => f.type === "error")).toBe(false);
+  });
+
+  it("11. an abandoned fragment alongside the refusal sentence is rejected — the valid sentence does not mask it", async () => {
     setProvider(makeMockProvider(ABANDONED_FRAGMENT_WITH_REFUSAL_SENTENCE));
 
     const frames = await collectFrames({ capability: "DIFFERENTIAL_DIAGNOSIS" }, `Bearer ${FIXTURE_TOKEN}`);
@@ -302,8 +353,8 @@ describe("DIFFERENTIAL_DIAGNOSIS capability", () => {
     expect(errorCodeOf(frames)).toBe("DIFFERENTIAL_STRUCTURE_INVALID");
   });
 
-  it("11. a mix of a cited item and an honestly-uncited-but-labeled item passes", async () => {
-    setProvider(makeMockProvider(MIXED_CITED_AND_HONEST_UNCITED));
+  it("12. a reason that wraps across two lines with a hard newline (no blank line before Confidence) now passes", async () => {
+    setProvider(makeMockProvider(WRAPPED_REASON_NO_SOURCE));
 
     const frames = await collectFrames({ capability: "DIFFERENTIAL_DIAGNOSIS" }, `Bearer ${FIXTURE_TOKEN}`);
 
