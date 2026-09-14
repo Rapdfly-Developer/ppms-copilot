@@ -467,7 +467,6 @@ export default function CopilotApp() {
             draftText={draftText}
             onDraftChange={setDraftText}
             capabilityLabel={capConfig.label}
-            requiresStrongDisclaimer={capConfig.requiresStrongDisclaimer ?? false}
           />
 
           <ActionBar

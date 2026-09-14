@@ -176,7 +176,10 @@ const DIFFERENTIAL_CERTAINTY_PATTERNS: RegExp[] = [
 
 // Isolates the considerations list from the rest of the response: everything
 // after the required heading, up to the next "## " heading (e.g. Documentation
-// Gaps) or the "---" disclaimer separator, whichever comes first.
+// Gaps) or a "---" line, whichever comes first. The prompt no longer instructs
+// a disclaimer after "---" (that messaging now lives only in the UI's shared
+// footer), but the boundary check stays as harmless generic defensive parsing
+// in case the model ever emits a stray "---" for some other reason.
 function extractConsiderationsSection(text: string): string {
   const headingIndex = text.indexOf(DIFFERENTIAL_HEADING);
   if (headingIndex === -1) return "";
