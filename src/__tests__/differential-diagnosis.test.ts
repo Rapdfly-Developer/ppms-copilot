@@ -8,6 +8,13 @@
 // Every scenario here was manually verified once as a disposable scratch
 // test during development (including the mixed-drift citation-bypass bug we
 // found and its fix); this file makes each of them permanent.
+//
+// Product decision update: DIFFERENTIAL_DIAGNOSIS now always attempts a
+// best-effort list from whatever documented symptoms/history exist, rather
+// than refusing when evidence is thin — citation is no longer required per
+// item (DIFFERENTIAL_UNCITED was removed from the validator). Confidence
+// vocabulary, structural/loose-candidate checks, and the universal
+// certainty-language and prescriptive-language hard-rejects are unchanged.
 
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { streamCopilotResponse } from "@/service/copilot";
@@ -99,7 +106,7 @@ const MULTI_ITEM_ALL_CITED = `## Possible Considerations for Review
 ---
 ${DISCLAIMER}`;
 
-// 3. Item missing citation entirely
+// 3. Item missing citation entirely — no longer disqualifying (product decision)
 const ITEM_MISSING_CITATION = `## Possible Considerations for Review
 - **Anterior uveitis** — Moderate consideration
   **Supporting documented evidence:** Documented photophobia.
@@ -107,10 +114,24 @@ const ITEM_MISSING_CITATION = `## Possible Considerations for Review
 ---
 ${DISCLAIMER}`;
 
-// 4. Non-citation parenthetical — "(likely)" is not a real evidence reference
+// 4. Vague non-citation parenthetical — citation *content* was never
+// independently validated even before this change (any non-empty parenthetical
+// containing "source"/"finding" passed); now citation presence itself is also
+// irrelevant, so this passes too.
 const NON_CITATION_PARENTHETICAL = `## Possible Considerations for Review
 - **Anterior uveitis** — Moderate consideration (likely)
   **Supporting documented evidence:** Documented photophobia.
+
+---
+${DISCLAIMER}`;
+
+// 11. Mix of a properly cited item and an honestly-uncited-but-labeled item —
+// the new prompt's second permitted item form for weak grounding.
+const MIXED_CITED_AND_HONEST_UNCITED = `## Possible Considerations for Review
+- **Anterior uveitis** — Moderate consideration (Source: V0 2024-06-15)
+  **Supporting documented evidence:** Documented photophobia and eye pain at V0.
+- **Early lens changes** — Low consideration (Not tied to a specific documented finding — based on general clinical reasoning from limited symptoms)
+  **Supporting documented evidence:** Gradual blurring of vision reported, consistent with early lens changes, though not specifically documented as such.
 
 ---
 ${DISCLAIMER}`;
@@ -209,22 +230,22 @@ describe("DIFFERENTIAL_DIAGNOSIS capability", () => {
     expect(frames.some((f) => f.type === "error")).toBe(false);
   });
 
-  it("3. item missing a citation is rejected as DIFFERENTIAL_UNCITED", async () => {
+  it("3. item missing a citation now passes — citation is no longer disqualifying", async () => {
     setProvider(makeMockProvider(ITEM_MISSING_CITATION));
 
     const frames = await collectFrames({ capability: "DIFFERENTIAL_DIAGNOSIS" }, `Bearer ${FIXTURE_TOKEN}`);
 
-    expect(frames.find((f) => f.type === "done")).toBeUndefined();
-    expect(errorCodeOf(frames)).toBe("DIFFERENTIAL_UNCITED");
+    expect(frames.find((f) => f.type === "done")).toBeDefined();
+    expect(frames.some((f) => f.type === "error")).toBe(false);
   });
 
-  it("4. a non-citation parenthetical like \"(likely)\" is rejected as uncited", async () => {
+  it("4. a vague parenthetical like \"(likely)\" also passes now — citation content is not validated", async () => {
     setProvider(makeMockProvider(NON_CITATION_PARENTHETICAL));
 
     const frames = await collectFrames({ capability: "DIFFERENTIAL_DIAGNOSIS" }, `Bearer ${FIXTURE_TOKEN}`);
 
-    expect(frames.find((f) => f.type === "done")).toBeUndefined();
-    expect(errorCodeOf(frames)).toBe("DIFFERENTIAL_UNCITED");
+    expect(frames.find((f) => f.type === "done")).toBeDefined();
+    expect(frames.some((f) => f.type === "error")).toBe(false);
   });
 
   it("5. a disallowed confidence label (\"High probability\") is rejected as RESPONSE_UNSAFE", async () => {
@@ -279,5 +300,14 @@ describe("DIFFERENTIAL_DIAGNOSIS capability", () => {
 
     expect(frames.find((f) => f.type === "done")).toBeUndefined();
     expect(errorCodeOf(frames)).toBe("DIFFERENTIAL_STRUCTURE_INVALID");
+  });
+
+  it("11. a mix of a cited item and an honestly-uncited-but-labeled item passes", async () => {
+    setProvider(makeMockProvider(MIXED_CITED_AND_HONEST_UNCITED));
+
+    const frames = await collectFrames({ capability: "DIFFERENTIAL_DIAGNOSIS" }, `Bearer ${FIXTURE_TOKEN}`);
+
+    expect(frames.find((f) => f.type === "done")).toBeDefined();
+    expect(frames.some((f) => f.type === "error")).toBe(false);
   });
 });

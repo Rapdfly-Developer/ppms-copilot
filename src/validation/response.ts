@@ -141,10 +141,11 @@ const WARNING_PATTERNS: { pattern: RegExp; warning: string }[] = [
 // NOTE_ASSISTANCE requires all four SOAP sections
 const SOAP_SECTIONS = ["Subjective:", "Objective:", "Assessment:", "Plan:"];
 
-// ── DIFFERENTIAL_DIAGNOSIS structural + citation requirements ─────────────────
+// ── DIFFERENTIAL_DIAGNOSIS structural + confidence-vocabulary requirements ────
 // The prompt (prompts/index.ts) locks the model to exactly this vocabulary and
 // this list format. The validator enforces that lock structurally — it does not
-// trust the model to have followed it.
+// trust the model to have followed it. Per-item citation is NOT enforced here
+// (product decision — see the per-item loop below for why).
 
 // Confidence vocabulary is deliberately limited to two non-committal labels.
 // "high" is never permitted — there is no cited-evidence tier that reaches it.
@@ -168,8 +169,8 @@ const DIFFERENTIAL_CERTAINTY_PATTERNS: RegExp[] = [
 
 // Matches one ranked-list item line, e.g.:
 //   - **Anterior uveitis** — Moderate consideration (Source: V0 2024-06-15)
-// Group 1: condition name. Group 2: confidence label text. Group 3: citation
-// content (undefined when the line has no trailing parenthetical at all).
+// Group 1: condition name. Group 2: confidence label text. Group 3: trailing
+// parenthetical content (citation or otherwise) — captured but not validated.
 const DIFFERENTIAL_ITEM_PATTERN =
   /^-\s*\*\*(.+?)\*\*\s*[-—]\s*([^(\n]+?)\s*(?:\(([^)]*)\))?\s*$/gm;
 
@@ -224,7 +225,7 @@ function validateDifferentialDiagnosis(sanitised: string): ValidationResult | nu
   if (looseCandidates.length > items.length) {
     return {
       ok: false,
-      reason: "Response contains a list item that does not match the required ranked-list format (check separator, confidence label, or citation)",
+      reason: "Response contains a list item that does not match the required ranked-list format (check separator or confidence label)",
       code: "DIFFERENTIAL_STRUCTURE_INVALID",
     };
   }
@@ -236,15 +237,22 @@ function validateDifferentialDiagnosis(sanitised: string): ValidationResult | nu
     return {
       ok: false,
       reason:
-        "Response is not a ranked list of considerations with confidence labels and citations, " +
+        "Response is not a ranked list of considerations with confidence labels, " +
         "and does not contain the required insufficient-evidence sentence",
       code: "DIFFERENTIAL_STRUCTURE_INVALID",
     };
   }
 
   // A single well-formed item is a fully valid response — no minimum count.
+  // Citation is deliberately NOT required here (product decision: always
+  // attempt a best-effort list from whatever documented symptoms/history
+  // exist, rather than refusing when evidence is thin). The prompt instructs
+  // the model to disclose when a consideration isn't tied to a specific
+  // documented finding rather than fabricating a citation, but that
+  // disclosure is a prompt-level instruction, not independently verified
+  // here — only structure and confidence vocabulary are still enforced.
   for (const match of items) {
-    const [, name, confidenceRaw, citation] = match;
+    const [, name, confidenceRaw] = match;
     const label = confidenceRaw.trim().toLowerCase();
 
     if (!DIFFERENTIAL_CONFIDENCE_LABELS.includes(label)) {
@@ -252,16 +260,6 @@ function validateDifferentialDiagnosis(sanitised: string): ValidationResult | nu
         ok: false,
         reason: `Consideration "${name.trim()}" uses a confidence label outside "Low consideration" / "Moderate consideration"`,
         code: "DIFFERENTIAL_STRUCTURE_INVALID",
-      };
-    }
-
-    // A citation must be a real evidence reference, not just any parenthetical.
-    const hasCitation = !!citation && /\b(source|finding)\b/i.test(citation);
-    if (!hasCitation) {
-      return {
-        ok: false,
-        reason: `Consideration "${name.trim()}" has no cited evidence reference`,
-        code: "DIFFERENTIAL_UNCITED",
       };
     }
   }
@@ -314,8 +312,8 @@ export function validateResponse(
     }
   }
 
-  // 4b. DIFFERENTIAL_DIAGNOSIS: ranked list, locked confidence vocabulary,
-  // and a citation on every item (or the fixed insufficient-evidence sentence).
+  // 4b. DIFFERENTIAL_DIAGNOSIS: ranked list with locked confidence vocabulary
+  // (or the fixed insufficient-evidence sentence). Citation is not required.
   if (capability === "DIFFERENTIAL_DIAGNOSIS") {
     const result = validateDifferentialDiagnosis(sanitised);
     if (result) return result;
