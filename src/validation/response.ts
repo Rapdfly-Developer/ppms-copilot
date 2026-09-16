@@ -158,8 +158,6 @@ const SOAP_SECTIONS = ["Subjective:", "Objective:", "Assessment:", "Plan:"];
 // "high" is never permitted — there is no cited-evidence tier that reaches it.
 const DIFFERENTIAL_CONFIDENCE_LABELS = ["low", "moderate"];
 
-const DIFFERENTIAL_HEADING = "## Possible Considerations for Review";
-
 const DIFFERENTIAL_NO_EVIDENCE_SENTENCE =
   "The documented record does not contain sufficient findings to support any diagnostic considerations at this time.";
 
@@ -174,28 +172,38 @@ const DIFFERENTIAL_CERTAINTY_PATTERNS: RegExp[] = [
   /\bdefinite(ly)?\s+diagnos/i,
 ];
 
-// Isolates the considerations list from the rest of the response: everything
-// after the required heading, up to the next "## " heading (e.g. Documentation
-// Gaps) or a "---" line, whichever comes first. The prompt no longer instructs
-// a disclaimer after "---" (that messaging now lives only in the UI's shared
-// footer), but the boundary check stays as harmless generic defensive parsing
-// in case the model ever emits a stray "---" for some other reason.
+// Isolates the considerations list from the rest of the response. No leading
+// heading is required — the prompt used to require a literal "## Possible
+// Considerations for Review" line, but openai/gpt-oss-120b reliably omitted
+// it (consistently reproduced live: well-formed blocks, no heading at all),
+// especially once this text is embedded as one JSON string value in the
+// consolidated response rather than a standalone reply. The heading was
+// never actually load-bearing for parsing — blocks can be isolated starting
+// from the beginning of the text just as well — so the prompt no longer asks
+// for one. If a leading "## ..." line is present anyway (old habit, or
+// drift, since other sections in the same consolidated response DO use "##"
+// headers), skip past it rather than let it corrupt block 1's parse.
+// Whatever's left is bounded by the next "## " heading (e.g. Documentation
+// Gaps) or a "---" line, whichever comes first — same boundary logic as
+// before, just no longer anchored to a required starting heading.
 function extractConsiderationsSection(text: string): string {
-  const headingIndex = text.indexOf(DIFFERENTIAL_HEADING);
-  if (headingIndex === -1) return "";
-  const afterHeading = text.slice(headingIndex + DIFFERENTIAL_HEADING.length);
+  let body = text;
+  const leadingHeadingMatch = body.match(/^##[^\n]*\n/);
+  if (leadingHeadingMatch) {
+    body = body.slice(leadingHeadingMatch[0].length);
+  }
 
-  let endIndex = afterHeading.length;
-  const nextHeadingMatch = afterHeading.match(/\n##\s/);
+  let endIndex = body.length;
+  const nextHeadingMatch = body.match(/\n##\s/);
   if (nextHeadingMatch?.index !== undefined) {
     endIndex = Math.min(endIndex, nextHeadingMatch.index);
   }
-  const separatorMatch = afterHeading.match(/\n---\s*\n/);
+  const separatorMatch = body.match(/\n---\s*\n/);
   if (separatorMatch?.index !== undefined) {
     endIndex = Math.min(endIndex, separatorMatch.index);
   }
 
-  return afterHeading.slice(0, endIndex).trim();
+  return body.slice(0, endIndex).trim();
 }
 
 // Parses one consideration block against the exact field order the prompt
@@ -262,14 +270,6 @@ function validateDifferentialDiagnosis(sanitised: string): ValidationResult | nu
         code: "RESPONSE_UNSAFE",
       };
     }
-  }
-
-  if (!sanitised.includes(DIFFERENTIAL_HEADING)) {
-    return {
-      ok: false,
-      reason: `Response missing required "${DIFFERENTIAL_HEADING}" section`,
-      code: "DIFFERENTIAL_STRUCTURE_INVALID",
-    };
   }
 
   const section = extractConsiderationsSection(sanitised);

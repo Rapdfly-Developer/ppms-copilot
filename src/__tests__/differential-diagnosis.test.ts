@@ -12,14 +12,25 @@
 //   [Reason — one line]
 //   Confidence: [Low / Moderate]
 //   Source: [optional — omitted entirely when not tied to a specific finding]
-// — blank line between blocks. Replaces an earlier single-line
-// "- **Name** — confidence (citation)" format, which needed hardening twice
-// against realistic model drift; this multi-line block format is parsed and
-// validated field-by-field (see validateDifferentialDiagnosis in
-// validation/response.ts) rather than via a single line-matching regex.
-// That validator logic is capability-specific and transport-agnostic — it runs
-// unchanged whether this capability arrives via the old standalone stream or
-// the current consolidated JSON section.
+// — blank line between blocks. No leading section heading is required or
+// expected: an earlier prompt version asked for a literal "## Possible
+// Considerations for Review" heading before the first block, but
+// openai/gpt-oss-120b reliably omitted it — live-reproduced 3/3 real API
+// calls, well-formed blocks every time, heading never present — especially
+// once this text is embedded as one JSON string value in the consolidated
+// response rather than a standalone reply. The heading was never actually
+// load-bearing for parsing (blocks are isolated starting from the beginning
+// of the text either way), so the prompt no longer asks for one and the
+// validator no longer requires one — it just tolerates one being present
+// anyway (see test 4 below), in case a model ever includes it out of habit.
+//
+// Replaces an earlier single-line "- **Name** — confidence (citation)"
+// format, which needed hardening twice against realistic model drift; this
+// multi-line block format is parsed and validated field-by-field (see
+// validateDifferentialDiagnosis in validation/response.ts) rather than via a
+// single line-matching regex. That validator logic is capability-specific and
+// transport-agnostic — it runs unchanged whether this capability arrives via
+// the old standalone stream or the current consolidated JSON section.
 
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { generateCopilot, type GenerateResponse } from "@/service/copilot-generate";
@@ -95,27 +106,24 @@ function buildConsolidatedResponseText(differentialDiagnosisText: string): strin
 }
 
 // ── Fixture response texts — one per scenario ─────────────────────────────────
-// No trailing disclaimer paragraph: the prompt no longer instructs the model
-// to echo an "IMPORTANT NOTICE" block (that safety messaging now lives only
-// in the UI's shared footer disclaimer, not in AI-generated output).
+// No leading heading (matches current prompt/model reality — see file header)
+// and no trailing disclaimer paragraph (that messaging now lives only in the
+// UI's shared footer, not in AI-generated output).
 
 // 1. Well-formed block WITH a Source (citation) line.
-const WELL_FORMED_WITH_CITATION = `## Possible Considerations for Review
-**Anterior uveitis**
+const WELL_FORMED_WITH_CITATION = `**Anterior uveitis**
 Documented photophobia and eye pain are consistent with anterior segment inflammation.
 Confidence: Moderate
 Source: V0 2024-06-15`;
 
 // 2. Well-formed block WITHOUT a Source line — general clinical reasoning,
 // not tied to a specific documented finding. Citation is optional by design.
-const WELL_FORMED_WITHOUT_CITATION = `## Possible Considerations for Review
-**Early cataract changes**
+const WELL_FORMED_WITHOUT_CITATION = `**Early cataract changes**
 Gradual blurring of vision is a general pattern consistent with early lens changes.
 Confidence: Low`;
 
 // Multi-item list mixing a cited and an uncited block — both forms in one response.
-const MULTI_ITEM_MIXED = `## Possible Considerations for Review
-**Anterior uveitis**
+const MULTI_ITEM_MIXED = `**Anterior uveitis**
 Documented photophobia and eye pain are consistent with anterior segment inflammation.
 Confidence: Moderate
 Source: V0 2024-06-15
@@ -124,75 +132,80 @@ Source: V0 2024-06-15
 Gradual blurring of vision is a general pattern consistent with early lens changes.
 Confidence: Low`;
 
-// 3. Missing reason line — Confidence line comes directly after the name.
-const MISSING_REASON_LINE = `## Possible Considerations for Review
+// 4. A well-formed response that still includes the old "## Possible
+// Considerations for Review" heading before the first block — simulating a
+// model that includes it out of habit or drift despite the prompt no longer
+// asking for it. Must still pass: the heading is tolerated, not required.
+const WELL_FORMED_WITH_STALE_HEADING = `## Possible Considerations for Review
 **Anterior uveitis**
+Documented photophobia and eye pain are consistent with anterior segment inflammation.
 Confidence: Moderate
 Source: V0 2024-06-15`;
 
-// 4. Missing Confidence line — Source line comes directly after the reason.
-const MISSING_CONFIDENCE_LINE = `## Possible Considerations for Review
-**Anterior uveitis**
+// 5. Missing reason line — Confidence line comes directly after the name.
+const MISSING_REASON_LINE = `**Anterior uveitis**
+Confidence: Moderate
+Source: V0 2024-06-15`;
+
+// 6. Missing Confidence line — Source line comes directly after the reason.
+const MISSING_CONFIDENCE_LINE = `**Anterior uveitis**
 Documented photophobia and eye pain reported.
 Source: V0 2024-06-15`;
 
-// 5. Confidence line present but with a value outside "Low" / "Moderate".
-const INVALID_CONFIDENCE_VALUE = `## Possible Considerations for Review
-**Anterior uveitis**
+// 7. Confidence line present but with a value outside "Low" / "Moderate".
+const INVALID_CONFIDENCE_VALUE = `**Anterior uveitis**
 Documented photophobia and eye pain reported.
 Confidence: Medium`;
 
-// 6. Certainty language — hard-rejected regardless of block structure.
-const CERTAINTY_LANGUAGE = `## Possible Considerations for Review
-**Anterior uveitis**
+// 8. Certainty language — hard-rejected regardless of block structure.
+const CERTAINTY_LANGUAGE = `**Anterior uveitis**
 This is a confirmed diagnosis based on the documented findings.
 Confidence: Moderate
 Source: V0 2024-06-15`;
 
-// 7. Prescriptive/treatment language mixed into an otherwise well-formed response.
-const PRESCRIPTIVE_LANGUAGE_MIXED_IN = `## Possible Considerations for Review
-**Anterior uveitis**
+// 9. Prescriptive/treatment language mixed into an otherwise well-formed response.
+const PRESCRIPTIVE_LANGUAGE_MIXED_IN = `**Anterior uveitis**
 Documented photophobia and eye pain reported.
 Confidence: Moderate
 Source: V0 2024-06-15
 
 I recommend starting topical steroids immediately.`;
 
-// 8. Malformed/drifted block — two considerations run together without a
+// 10. Malformed/drifted block — two considerations run together without a
 // blank line between them, so they parse as a single 6-line block instead
 // of two valid 4-line blocks. Rejected by the block length bound.
-const MALFORMED_DRIFTED_BLOCK = `## Possible Considerations for Review
-**Anterior uveitis**
+const MALFORMED_DRIFTED_BLOCK = `**Anterior uveitis**
 Documented photophobia and eye pain reported.
 Confidence: Moderate
 **Episcleritis**
 Documented redness without discharge.
 Confidence: Low`;
 
-// 9. Missing the required heading entirely.
-const MISSING_HEADING =
+// 11. Unstructured free text with no block-shaped content at all — no bold
+// name lines, no Confidence lines. Since no heading is required anymore,
+// this is rejected purely because nothing in it parses as a valid block
+// (not because a heading is missing).
+const UNSTRUCTURED_FREE_TEXT_NO_BLOCKS =
   "Some free text response describing possible considerations informally, without using " +
-  "the required structured heading or block format the prompt specifies at all.";
+  "the required structured block format the prompt specifies at all.";
 
-// 10. Exact insufficient-evidence sentence, zero blocks.
-const NO_EVIDENCE_SENTENCE = `## Possible Considerations for Review
-The documented record does not contain sufficient findings to support any diagnostic considerations at this time.`;
+// 12. Exact insufficient-evidence sentence, zero blocks.
+const NO_EVIDENCE_SENTENCE =
+  "The documented record does not contain sufficient findings to support any diagnostic considerations at this time.";
 
-// 11. A well-intentioned reason that wraps across two lines with a hard
+// 13. A well-intentioned reason that wraps across two lines with a hard
 // newline (no blank line before Confidence) — not a separate field, just a
 // long sentence that broke mid-clause. Must still pass: the reason is
 // reconstructed from every line before the Confidence line, however many.
-const WRAPPED_REASON_NO_SOURCE = `## Possible Considerations for Review
-**Anterior uveitis**
+const WRAPPED_REASON_NO_SOURCE = `**Anterior uveitis**
 Documented photophobia and eye pain are consistent with
 anterior segment inflammation, warranting consideration.
 Confidence: Moderate`;
 
-// 12. An abandoned/malformed fragment alongside the exact refusal sentence —
+// 14. An abandoned/malformed fragment alongside the exact refusal sentence —
 // the fragment must not be able to hide behind a valid refusal elsewhere in
 // the same section. Fail closed rather than letting noEvidence short-circuit.
-const ABANDONED_FRAGMENT_WITH_REFUSAL_SENTENCE = `## Possible Considerations for Review
-**Possible glau
+const ABANDONED_FRAGMENT_WITH_REFUSAL_SENTENCE = `**Possible glau
 
 The documented record does not contain sufficient findings to support any diagnostic considerations at this time.`;
 
@@ -214,7 +227,7 @@ afterEach(() => {
 });
 
 describe("DIFFERENTIAL_DIAGNOSIS capability (consolidated path)", () => {
-  it("1. well-formed block WITH a citation (Source line) passes", async () => {
+  it("1. well-formed block WITH a citation (Source line), no heading, passes", async () => {
     setProvider(makeMockProvider(buildConsolidatedResponseText(WELL_FORMED_WITH_CITATION)));
 
     const result = await generate();
@@ -247,7 +260,18 @@ describe("DIFFERENTIAL_DIAGNOSIS capability (consolidated path)", () => {
     }
   });
 
-  it("3. a block missing its reason line is rejected as DIFFERENTIAL_STRUCTURE_INVALID", async () => {
+  it("4. a response that still includes the old heading (model drift/habit) is tolerated, not rejected", async () => {
+    setProvider(makeMockProvider(buildConsolidatedResponseText(WELL_FORMED_WITH_STALE_HEADING)));
+
+    const result = await generate();
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.differentialDiagnosis.ok).toBe(true);
+    }
+  });
+
+  it("5. a block missing its reason line is rejected as DIFFERENTIAL_STRUCTURE_INVALID", async () => {
     setProvider(makeMockProvider(buildConsolidatedResponseText(MISSING_REASON_LINE)));
 
     const result = await generate();
@@ -261,7 +285,7 @@ describe("DIFFERENTIAL_DIAGNOSIS capability (consolidated path)", () => {
     }
   });
 
-  it("4. a block missing its Confidence line is rejected as DIFFERENTIAL_STRUCTURE_INVALID", async () => {
+  it("6. a block missing its Confidence line is rejected as DIFFERENTIAL_STRUCTURE_INVALID", async () => {
     setProvider(makeMockProvider(buildConsolidatedResponseText(MISSING_CONFIDENCE_LINE)));
 
     const result = await generate();
@@ -275,7 +299,7 @@ describe("DIFFERENTIAL_DIAGNOSIS capability (consolidated path)", () => {
     }
   });
 
-  it("5. a Confidence value outside Low/Moderate is rejected as DIFFERENTIAL_STRUCTURE_INVALID", async () => {
+  it("7. a Confidence value outside Low/Moderate is rejected as DIFFERENTIAL_STRUCTURE_INVALID", async () => {
     setProvider(makeMockProvider(buildConsolidatedResponseText(INVALID_CONFIDENCE_VALUE)));
 
     const result = await generate();
@@ -289,7 +313,7 @@ describe("DIFFERENTIAL_DIAGNOSIS capability (consolidated path)", () => {
     }
   });
 
-  it("6. certainty language is rejected as RESPONSE_UNSAFE regardless of block structure", async () => {
+  it("8. certainty language is rejected as RESPONSE_UNSAFE regardless of block structure", async () => {
     setProvider(makeMockProvider(buildConsolidatedResponseText(CERTAINTY_LANGUAGE)));
 
     const result = await generate();
@@ -303,7 +327,7 @@ describe("DIFFERENTIAL_DIAGNOSIS capability (consolidated path)", () => {
     }
   });
 
-  it("7. prescriptive/treatment language mixed in is rejected as RESPONSE_UNSAFE (universal check, unchanged)", async () => {
+  it("9. prescriptive/treatment language mixed in is rejected as RESPONSE_UNSAFE (universal check, unchanged)", async () => {
     setProvider(makeMockProvider(buildConsolidatedResponseText(PRESCRIPTIVE_LANGUAGE_MIXED_IN)));
 
     const result = await generate();
@@ -317,7 +341,7 @@ describe("DIFFERENTIAL_DIAGNOSIS capability (consolidated path)", () => {
     }
   });
 
-  it("8. a malformed/drifted block (two considerations run together) is rejected as DIFFERENTIAL_STRUCTURE_INVALID", async () => {
+  it("10. a malformed/drifted block (two considerations run together) is rejected as DIFFERENTIAL_STRUCTURE_INVALID", async () => {
     setProvider(makeMockProvider(buildConsolidatedResponseText(MALFORMED_DRIFTED_BLOCK)));
 
     const result = await generate();
@@ -331,8 +355,8 @@ describe("DIFFERENTIAL_DIAGNOSIS capability (consolidated path)", () => {
     }
   });
 
-  it("9. missing the required heading is rejected as DIFFERENTIAL_STRUCTURE_INVALID", async () => {
-    setProvider(makeMockProvider(buildConsolidatedResponseText(MISSING_HEADING)));
+  it("11. unstructured free text with no block-shaped content is rejected as DIFFERENTIAL_STRUCTURE_INVALID", async () => {
+    setProvider(makeMockProvider(buildConsolidatedResponseText(UNSTRUCTURED_FREE_TEXT_NO_BLOCKS)));
 
     const result = await generate();
 
@@ -345,7 +369,7 @@ describe("DIFFERENTIAL_DIAGNOSIS capability (consolidated path)", () => {
     }
   });
 
-  it("10. the exact insufficient-evidence sentence with zero blocks passes", async () => {
+  it("12. the exact insufficient-evidence sentence with zero blocks passes", async () => {
     setProvider(makeMockProvider(buildConsolidatedResponseText(NO_EVIDENCE_SENTENCE)));
 
     const result = await generate();
@@ -356,7 +380,7 @@ describe("DIFFERENTIAL_DIAGNOSIS capability (consolidated path)", () => {
     }
   });
 
-  it("11. a reason that wraps across two lines with a hard newline (no blank line before Confidence) passes", async () => {
+  it("13. a reason that wraps across two lines with a hard newline (no blank line before Confidence) passes", async () => {
     setProvider(makeMockProvider(buildConsolidatedResponseText(WRAPPED_REASON_NO_SOURCE)));
 
     const result = await generate();
@@ -367,7 +391,7 @@ describe("DIFFERENTIAL_DIAGNOSIS capability (consolidated path)", () => {
     }
   });
 
-  it("12. an abandoned fragment alongside the refusal sentence is rejected — the valid sentence does not mask it", async () => {
+  it("14. an abandoned fragment alongside the refusal sentence is rejected — the valid sentence does not mask it", async () => {
     setProvider(makeMockProvider(buildConsolidatedResponseText(ABANDONED_FRAGMENT_WITH_REFUSAL_SENTENCE)));
 
     const result = await generate();
@@ -381,13 +405,13 @@ describe("DIFFERENTIAL_DIAGNOSIS capability (consolidated path)", () => {
     }
   });
 
-  it("13. a malformed differentialDiagnosis section does not invalidate the other 6 sections", async () => {
+  it("15. a malformed differentialDiagnosis section does not invalidate the other 6 sections", async () => {
     // The core architectural property of the consolidated response: each
     // section is validated independently, so one bad section degrades
     // gracefully instead of discarding the whole visit's AI output — unlike
     // the old standalone-stream path, where a validation failure meant the
     // entire single-capability response was discarded.
-    setProvider(makeMockProvider(buildConsolidatedResponseText(MISSING_HEADING)));
+    setProvider(makeMockProvider(buildConsolidatedResponseText(UNSTRUCTURED_FREE_TEXT_NO_BLOCKS)));
 
     const result = await generate();
 
@@ -403,7 +427,7 @@ describe("DIFFERENTIAL_DIAGNOSIS capability (consolidated path)", () => {
     }
   });
 
-  it("14. DIFFERENTIAL_DIAGNOSIS no longer requires the strong disclaimer banner", () => {
+  it("16. DIFFERENTIAL_DIAGNOSIS no longer requires the strong disclaimer banner", () => {
     // The red "This is NOT a diagnosis" banner (ResponseArea's StrongDisclaimer)
     // was driven entirely by this config flag. It's been removed from the UI
     // as redundant with the shared footer disclaimer shown on every tab — this

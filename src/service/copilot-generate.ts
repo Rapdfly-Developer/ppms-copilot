@@ -20,6 +20,7 @@
 
 import { validateResponse } from "@/validation/response";
 import { createProvider } from "@/ai";
+import { AiProviderError } from "@/ai/provider";
 import { getCopilotReasoningModel } from "@/lib/env";
 import { CopilotError, USER_MESSAGES, type ErrorCode } from "@/lib/errors";
 import { logger } from "@/lib/logger";
@@ -149,7 +150,7 @@ export async function generateCopilot(
     visitsIncluded: context.stats.visitsIncluded,
   });
 
-  // 4. Single AI call — all six sections as structured JSON
+  // 4. Single AI call — all seven sections as structured JSON
   const systemPrompt = buildConsolidatedSystemPrompt();
   const userMessage = buildConsolidatedUserMessage(context.text);
 
@@ -166,10 +167,17 @@ export async function generateCopilot(
     const result = await provider.complete({
       systemPrompt,
       messages: [{ role: "user", content: userMessage }],
-      // 6000: was 5000 for 6 sections: bumped to give the 7th (differentialDiagnosis)
-      // room without starving whichever key the model emits last — a truncated
-      // JSON response fails to parse for ALL sections, not just the last one.
-      maxTokens: 6000,
+      // 10000: was 6000, which proved too tight for openai/gpt-oss-120b — live
+      // testing produced a Groq-side "Failed to generate JSON" error at that
+      // cap (the model overran it and the response was cut off mid-JSON,
+      // making the whole thing unparseable). Sized with real headroom above
+      // the pre-consolidation per-capability sum (700+1000+1200+1400+1400+
+      // 1400+1400 = 8500, tuned for the old, less verbose Llama defaults) to
+      // absorb this model's more verbose style. A truncated JSON response
+      // fails to parse for ALL sections, not just whichever key comes last,
+      // so this budget needs to comfortably cover genuine worst-case
+      // richness, not just the typical case.
+      maxTokens: 10000,
       reasoningEffort: "high",
       modelOverride: model,
       responseFormat: "json_object",
@@ -183,8 +191,20 @@ export async function generateCopilot(
       stopReason: result.stopReason,
     };
   } catch (err) {
-    const code =
-      err instanceof CopilotError ? err.code : ("AI_UNAVAILABLE" as ErrorCode);
+    // Provider failures (Groq/Anthropic) throw AiProviderError, not
+    // CopilotError — these are two separate class hierarchies (AiProviderError
+    // lives in @/ai/provider, CopilotError in @/lib/errors). Checking only
+    // `instanceof CopilotError` here meant this branch never matched a real
+    // provider failure, so every AI-call error — rate limit, auth failure,
+    // timeout, bad request — silently collapsed to the generic AI_UNAVAILABLE
+    // fallback, discarding the specific, more actionable code the provider
+    // layer had already classified (e.g. AI_RATE_LIMITED).
+    const code: ErrorCode =
+      err instanceof AiProviderError
+        ? (err.code as ErrorCode)
+        : err instanceof CopilotError
+          ? err.code
+          : ("AI_UNAVAILABLE" as ErrorCode);
     logger.error("generate_ai_failed", { requestId, code });
     return {
       ok: false,

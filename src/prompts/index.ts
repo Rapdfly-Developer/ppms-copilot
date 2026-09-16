@@ -86,8 +86,7 @@ Do not imply access to results you do not have.
 
 Always attempt at least one possible consideration from whatever documented symptoms, chief complaint, or history exist — however minimal. Do not refuse to produce a list merely because the documented evidence is thin; reason generally from the limited symptoms described rather than declining. Only use the exact fallback sentence below in the rare case where the record contains no complaint, symptoms, or history at all to reason from.
 
-## Possible Considerations for Review
-List each consideration as its own block, ordered from most to least supported by the documented record. Use EXACTLY this structure for every block, in this exact line order, with a blank line between blocks and no blank line within a block:
+Structure your response as a series of consideration blocks, ordered from most to least supported by the documented record. Do NOT add a section title or heading before the first block — begin your response directly with the first block. Use EXACTLY this structure for every block, in this exact line order, with a blank line between blocks and no blank line within a block:
 
 **[Diagnosis name]**
 [Reason it's suggested — one short, precise line]
