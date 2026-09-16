@@ -1,9 +1,11 @@
 // DIFFERENTIAL_DIAGNOSIS capability — permanent regression suite.
 //
-// Exercises the full real pipeline (streamCopilotResponse → context build →
-// mock AI → validateResponse) the same way capability-service.test.ts does
-// for every other capability — not the validator in isolation — so this also
-// proves the prompt/service/validator wiring for this capability stays intact.
+// Exercises the full real pipeline through the CONSOLIDATED code path
+// (generateCopilot → context build → mock AI → validateResponse), matching how
+// this capability actually runs in production now: as the 7th section of the
+// single /api/copilot/generate request, alongside the other 6 tabs — not as a
+// standalone /api/copilot/stream call. This proves the prompt/service/validator
+// wiring for this capability stays intact inside the consolidated JSON response.
 //
 // Output format: one block per consideration —
 //   **[Diagnosis name]**
@@ -15,14 +17,16 @@
 // against realistic model drift; this multi-line block format is parsed and
 // validated field-by-field (see validateDifferentialDiagnosis in
 // validation/response.ts) rather than via a single line-matching regex.
+// That validator logic is capability-specific and transport-agnostic — it runs
+// unchanged whether this capability arrives via the old standalone stream or
+// the current consolidated JSON section.
 
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
-import { streamCopilotResponse } from "@/service/copilot";
+import { generateCopilot, type GenerateResponse } from "@/service/copilot-generate";
 import { setProvider, resetProvider } from "@/ai";
 import { CAPABILITY_CONFIG } from "@/capabilities";
 import * as ppmsClient from "@/lib/ppms-client";
 import type { AIProvider, AiResult, AiStreamEvent } from "@/ai/provider";
-import type { NdjsonFrame } from "@/service/copilot";
 import {
   FIXTURE_PATIENT,
   FIXTURE_VISIT_CURRENT,
@@ -33,6 +37,8 @@ import {
 } from "./fixtures/patient";
 
 // ── Mock AI provider ──────────────────────────────────────────────────────────
+// generateCopilot() always uses provider.complete() (non-streaming, JSON mode)
+// — stream() is required by the AIProvider interface but never called here.
 
 function makeMockProvider(responseText: string): AIProvider {
   return {
@@ -49,10 +55,7 @@ function makeMockProvider(responseText: string): AIProvider {
       };
     },
     async *stream(): AsyncIterable<AiStreamEvent> {
-      const third = Math.ceil(responseText.length / 3);
-      yield { type: "text", text: responseText.slice(0, third) };
-      yield { type: "text", text: responseText.slice(third, third * 2) };
-      yield { type: "text", text: responseText.slice(third * 2) };
+      yield { type: "text", text: responseText };
       yield {
         type: "done",
         model: "mock-model",
@@ -64,20 +67,31 @@ function makeMockProvider(responseText: string): AIProvider {
   };
 }
 
-async function collectFrames(
-  body: Record<string, unknown>,
-  authHeader: string,
-): Promise<NdjsonFrame[]> {
-  const frames: NdjsonFrame[] = [];
-  for await (const frame of streamCopilotResponse(body, authHeader)) {
-    frames.push(frame);
-  }
-  return frames;
+async function generate(): Promise<GenerateResponse> {
+  return generateCopilot(`Bearer ${FIXTURE_TOKEN}`);
 }
 
-function errorCodeOf(frames: NdjsonFrame[]): string | undefined {
-  const errorFrame = frames.find((f) => f.type === "error");
-  return errorFrame?.type === "error" ? errorFrame.code : undefined;
+// Safe, minimal, generically-valid placeholder text for the 6 sections this
+// suite isn't testing — just needs to be non-empty and not trip any safety
+// pattern. draftNote needs all four SOAP headings to pass NOTE_ASSISTANCE's
+// structural check.
+const SAFE_OTHER_SECTIONS = {
+  snapshot: "Documented and stable; no acute findings reported at this visit.",
+  previousVisits: "Documented history consistent with prior visits; no new findings.",
+  timeline: "Documented visit history spans multiple prior encounters.",
+  attention: "No documented changes requiring attention at this time.",
+  draftNote:
+    "## Subjective:\nStable per documentation.\n## Objective:\nStable per documentation.\n" +
+    "## Assessment:\nStable per documentation.\n## Plan:\nContinue as documented.",
+  followUp: "Documented follow-up plan continues as previously recorded.",
+};
+
+// Builds the raw JSON text the mock AI "returns" for the consolidated call —
+// the 6 safe placeholder sections plus the differentialDiagnosis text under
+// test. JSON.stringify handles all escaping, so fixture text below can be
+// written as plain multi-line template literals with no manual escaping.
+function buildConsolidatedResponseText(differentialDiagnosisText: string): string {
+  return JSON.stringify({ ...SAFE_OTHER_SECTIONS, differentialDiagnosis: differentialDiagnosisText });
 }
 
 // ── Fixture response texts — one per scenario ─────────────────────────────────
@@ -164,7 +178,7 @@ const MISSING_HEADING =
 const NO_EVIDENCE_SENTENCE = `## Possible Considerations for Review
 The documented record does not contain sufficient findings to support any diagnostic considerations at this time.`;
 
-// 12. A well-intentioned reason that wraps across two lines with a hard
+// 11. A well-intentioned reason that wraps across two lines with a hard
 // newline (no blank line before Confidence) — not a separate field, just a
 // long sentence that broke mid-clause. Must still pass: the reason is
 // reconstructed from every line before the Confidence line, however many.
@@ -174,7 +188,7 @@ Documented photophobia and eye pain are consistent with
 anterior segment inflammation, warranting consideration.
 Confidence: Moderate`;
 
-// 11. An abandoned/malformed fragment alongside the exact refusal sentence —
+// 12. An abandoned/malformed fragment alongside the exact refusal sentence —
 // the fragment must not be able to hide behind a valid refusal elsewhere in
 // the same section. Fail closed rather than letting noEvidence short-circuit.
 const ABANDONED_FRAGMENT_WITH_REFUSAL_SENTENCE = `## Possible Considerations for Review
@@ -199,131 +213,197 @@ afterEach(() => {
   delete process.env.PPMS_CORE_URL;
 });
 
-describe("DIFFERENTIAL_DIAGNOSIS capability", () => {
-  it("1. well-formed block WITH a citation (Source line) passes, with correct done-frame meta", async () => {
-    setProvider(makeMockProvider(WELL_FORMED_WITH_CITATION));
+describe("DIFFERENTIAL_DIAGNOSIS capability (consolidated path)", () => {
+  it("1. well-formed block WITH a citation (Source line) passes", async () => {
+    setProvider(makeMockProvider(buildConsolidatedResponseText(WELL_FORMED_WITH_CITATION)));
 
-    const frames = await collectFrames({ capability: "DIFFERENTIAL_DIAGNOSIS" }, `Bearer ${FIXTURE_TOKEN}`);
-    const done = frames.find((f) => f.type === "done");
+    const result = await generate();
 
-    expect(done).toBeDefined();
-    expect(frames.some((f) => f.type === "error")).toBe(false);
-    if (done?.type === "done") {
-      expect(done.meta.capability).toBe("DIFFERENTIAL_DIAGNOSIS");
-      expect(done.meta.modelTier).toBe("reasoning");
-      expect(done.meta.producesDraft).toBe(false);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.differentialDiagnosis.ok).toBe(true);
     }
   });
 
   it("2. well-formed block WITHOUT a citation (no Source line) also passes — citation is optional", async () => {
-    setProvider(makeMockProvider(WELL_FORMED_WITHOUT_CITATION));
+    setProvider(makeMockProvider(buildConsolidatedResponseText(WELL_FORMED_WITHOUT_CITATION)));
 
-    const frames = await collectFrames({ capability: "DIFFERENTIAL_DIAGNOSIS" }, `Bearer ${FIXTURE_TOKEN}`);
+    const result = await generate();
 
-    expect(frames.find((f) => f.type === "done")).toBeDefined();
-    expect(frames.some((f) => f.type === "error")).toBe(false);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.differentialDiagnosis.ok).toBe(true);
+    }
   });
 
   it("multi-item list mixing a cited and an uncited block passes", async () => {
-    setProvider(makeMockProvider(MULTI_ITEM_MIXED));
+    setProvider(makeMockProvider(buildConsolidatedResponseText(MULTI_ITEM_MIXED)));
 
-    const frames = await collectFrames({ capability: "DIFFERENTIAL_DIAGNOSIS" }, `Bearer ${FIXTURE_TOKEN}`);
+    const result = await generate();
 
-    expect(frames.find((f) => f.type === "done")).toBeDefined();
-    expect(frames.some((f) => f.type === "error")).toBe(false);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.differentialDiagnosis.ok).toBe(true);
+    }
   });
 
   it("3. a block missing its reason line is rejected as DIFFERENTIAL_STRUCTURE_INVALID", async () => {
-    setProvider(makeMockProvider(MISSING_REASON_LINE));
+    setProvider(makeMockProvider(buildConsolidatedResponseText(MISSING_REASON_LINE)));
 
-    const frames = await collectFrames({ capability: "DIFFERENTIAL_DIAGNOSIS" }, `Bearer ${FIXTURE_TOKEN}`);
+    const result = await generate();
 
-    expect(frames.find((f) => f.type === "done")).toBeUndefined();
-    expect(errorCodeOf(frames)).toBe("DIFFERENTIAL_STRUCTURE_INVALID");
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.differentialDiagnosis.ok).toBe(false);
+      if (!result.data.differentialDiagnosis.ok) {
+        expect(result.data.differentialDiagnosis.errorCode).toBe("DIFFERENTIAL_STRUCTURE_INVALID");
+      }
+    }
   });
 
   it("4. a block missing its Confidence line is rejected as DIFFERENTIAL_STRUCTURE_INVALID", async () => {
-    setProvider(makeMockProvider(MISSING_CONFIDENCE_LINE));
+    setProvider(makeMockProvider(buildConsolidatedResponseText(MISSING_CONFIDENCE_LINE)));
 
-    const frames = await collectFrames({ capability: "DIFFERENTIAL_DIAGNOSIS" }, `Bearer ${FIXTURE_TOKEN}`);
+    const result = await generate();
 
-    expect(frames.find((f) => f.type === "done")).toBeUndefined();
-    expect(errorCodeOf(frames)).toBe("DIFFERENTIAL_STRUCTURE_INVALID");
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.differentialDiagnosis.ok).toBe(false);
+      if (!result.data.differentialDiagnosis.ok) {
+        expect(result.data.differentialDiagnosis.errorCode).toBe("DIFFERENTIAL_STRUCTURE_INVALID");
+      }
+    }
   });
 
   it("5. a Confidence value outside Low/Moderate is rejected as DIFFERENTIAL_STRUCTURE_INVALID", async () => {
-    setProvider(makeMockProvider(INVALID_CONFIDENCE_VALUE));
+    setProvider(makeMockProvider(buildConsolidatedResponseText(INVALID_CONFIDENCE_VALUE)));
 
-    const frames = await collectFrames({ capability: "DIFFERENTIAL_DIAGNOSIS" }, `Bearer ${FIXTURE_TOKEN}`);
+    const result = await generate();
 
-    expect(frames.find((f) => f.type === "done")).toBeUndefined();
-    expect(errorCodeOf(frames)).toBe("DIFFERENTIAL_STRUCTURE_INVALID");
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.differentialDiagnosis.ok).toBe(false);
+      if (!result.data.differentialDiagnosis.ok) {
+        expect(result.data.differentialDiagnosis.errorCode).toBe("DIFFERENTIAL_STRUCTURE_INVALID");
+      }
+    }
   });
 
   it("6. certainty language is rejected as RESPONSE_UNSAFE regardless of block structure", async () => {
-    setProvider(makeMockProvider(CERTAINTY_LANGUAGE));
+    setProvider(makeMockProvider(buildConsolidatedResponseText(CERTAINTY_LANGUAGE)));
 
-    const frames = await collectFrames({ capability: "DIFFERENTIAL_DIAGNOSIS" }, `Bearer ${FIXTURE_TOKEN}`);
+    const result = await generate();
 
-    expect(frames.find((f) => f.type === "done")).toBeUndefined();
-    expect(errorCodeOf(frames)).toBe("RESPONSE_UNSAFE");
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.differentialDiagnosis.ok).toBe(false);
+      if (!result.data.differentialDiagnosis.ok) {
+        expect(result.data.differentialDiagnosis.errorCode).toBe("RESPONSE_UNSAFE");
+      }
+    }
   });
 
   it("7. prescriptive/treatment language mixed in is rejected as RESPONSE_UNSAFE (universal check, unchanged)", async () => {
-    setProvider(makeMockProvider(PRESCRIPTIVE_LANGUAGE_MIXED_IN));
+    setProvider(makeMockProvider(buildConsolidatedResponseText(PRESCRIPTIVE_LANGUAGE_MIXED_IN)));
 
-    const frames = await collectFrames({ capability: "DIFFERENTIAL_DIAGNOSIS" }, `Bearer ${FIXTURE_TOKEN}`);
+    const result = await generate();
 
-    expect(frames.find((f) => f.type === "done")).toBeUndefined();
-    expect(errorCodeOf(frames)).toBe("RESPONSE_UNSAFE");
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.differentialDiagnosis.ok).toBe(false);
+      if (!result.data.differentialDiagnosis.ok) {
+        expect(result.data.differentialDiagnosis.errorCode).toBe("RESPONSE_UNSAFE");
+      }
+    }
   });
 
   it("8. a malformed/drifted block (two considerations run together) is rejected as DIFFERENTIAL_STRUCTURE_INVALID", async () => {
-    setProvider(makeMockProvider(MALFORMED_DRIFTED_BLOCK));
+    setProvider(makeMockProvider(buildConsolidatedResponseText(MALFORMED_DRIFTED_BLOCK)));
 
-    const frames = await collectFrames({ capability: "DIFFERENTIAL_DIAGNOSIS" }, `Bearer ${FIXTURE_TOKEN}`);
+    const result = await generate();
 
-    expect(frames.find((f) => f.type === "done")).toBeUndefined();
-    expect(errorCodeOf(frames)).toBe("DIFFERENTIAL_STRUCTURE_INVALID");
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.differentialDiagnosis.ok).toBe(false);
+      if (!result.data.differentialDiagnosis.ok) {
+        expect(result.data.differentialDiagnosis.errorCode).toBe("DIFFERENTIAL_STRUCTURE_INVALID");
+      }
+    }
   });
 
   it("9. missing the required heading is rejected as DIFFERENTIAL_STRUCTURE_INVALID", async () => {
-    setProvider(makeMockProvider(MISSING_HEADING));
+    setProvider(makeMockProvider(buildConsolidatedResponseText(MISSING_HEADING)));
 
-    const frames = await collectFrames({ capability: "DIFFERENTIAL_DIAGNOSIS" }, `Bearer ${FIXTURE_TOKEN}`);
+    const result = await generate();
 
-    expect(frames.find((f) => f.type === "done")).toBeUndefined();
-    expect(errorCodeOf(frames)).toBe("DIFFERENTIAL_STRUCTURE_INVALID");
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.differentialDiagnosis.ok).toBe(false);
+      if (!result.data.differentialDiagnosis.ok) {
+        expect(result.data.differentialDiagnosis.errorCode).toBe("DIFFERENTIAL_STRUCTURE_INVALID");
+      }
+    }
   });
 
   it("10. the exact insufficient-evidence sentence with zero blocks passes", async () => {
-    setProvider(makeMockProvider(NO_EVIDENCE_SENTENCE));
+    setProvider(makeMockProvider(buildConsolidatedResponseText(NO_EVIDENCE_SENTENCE)));
 
-    const frames = await collectFrames({ capability: "DIFFERENTIAL_DIAGNOSIS" }, `Bearer ${FIXTURE_TOKEN}`);
+    const result = await generate();
 
-    expect(frames.find((f) => f.type === "done")).toBeDefined();
-    expect(frames.some((f) => f.type === "error")).toBe(false);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.differentialDiagnosis.ok).toBe(true);
+    }
   });
 
-  it("11. an abandoned fragment alongside the refusal sentence is rejected — the valid sentence does not mask it", async () => {
-    setProvider(makeMockProvider(ABANDONED_FRAGMENT_WITH_REFUSAL_SENTENCE));
+  it("11. a reason that wraps across two lines with a hard newline (no blank line before Confidence) passes", async () => {
+    setProvider(makeMockProvider(buildConsolidatedResponseText(WRAPPED_REASON_NO_SOURCE)));
 
-    const frames = await collectFrames({ capability: "DIFFERENTIAL_DIAGNOSIS" }, `Bearer ${FIXTURE_TOKEN}`);
+    const result = await generate();
 
-    expect(frames.find((f) => f.type === "done")).toBeUndefined();
-    expect(errorCodeOf(frames)).toBe("DIFFERENTIAL_STRUCTURE_INVALID");
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.differentialDiagnosis.ok).toBe(true);
+    }
   });
 
-  it("12. a reason that wraps across two lines with a hard newline (no blank line before Confidence) now passes", async () => {
-    setProvider(makeMockProvider(WRAPPED_REASON_NO_SOURCE));
+  it("12. an abandoned fragment alongside the refusal sentence is rejected — the valid sentence does not mask it", async () => {
+    setProvider(makeMockProvider(buildConsolidatedResponseText(ABANDONED_FRAGMENT_WITH_REFUSAL_SENTENCE)));
 
-    const frames = await collectFrames({ capability: "DIFFERENTIAL_DIAGNOSIS" }, `Bearer ${FIXTURE_TOKEN}`);
+    const result = await generate();
 
-    expect(frames.find((f) => f.type === "done")).toBeDefined();
-    expect(frames.some((f) => f.type === "error")).toBe(false);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.differentialDiagnosis.ok).toBe(false);
+      if (!result.data.differentialDiagnosis.ok) {
+        expect(result.data.differentialDiagnosis.errorCode).toBe("DIFFERENTIAL_STRUCTURE_INVALID");
+      }
+    }
   });
 
-  it("13. DIFFERENTIAL_DIAGNOSIS no longer requires the strong disclaimer banner", () => {
+  it("13. a malformed differentialDiagnosis section does not invalidate the other 6 sections", async () => {
+    // The core architectural property of the consolidated response: each
+    // section is validated independently, so one bad section degrades
+    // gracefully instead of discarding the whole visit's AI output — unlike
+    // the old standalone-stream path, where a validation failure meant the
+    // entire single-capability response was discarded.
+    setProvider(makeMockProvider(buildConsolidatedResponseText(MISSING_HEADING)));
+
+    const result = await generate();
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.differentialDiagnosis.ok).toBe(false);
+      expect(result.data.snapshot.ok).toBe(true);
+      expect(result.data.previousVisits.ok).toBe(true);
+      expect(result.data.timeline.ok).toBe(true);
+      expect(result.data.attention.ok).toBe(true);
+      expect(result.data.draftNote.ok).toBe(true);
+      expect(result.data.followUp.ok).toBe(true);
+    }
+  });
+
+  it("14. DIFFERENTIAL_DIAGNOSIS no longer requires the strong disclaimer banner", () => {
     // The red "This is NOT a diagnosis" banner (ResponseArea's StrongDisclaimer)
     // was driven entirely by this config flag. It's been removed from the UI
     // as redundant with the shared footer disclaimer shown on every tab — this

@@ -14,6 +14,7 @@ export type CopilotData = {
   attention: SectionOutcome;
   draftNote: SectionOutcome;
   followUp: SectionOutcome;
+  differentialDiagnosis: SectionOutcome;
 };
 
 export type CopilotGenerateState =

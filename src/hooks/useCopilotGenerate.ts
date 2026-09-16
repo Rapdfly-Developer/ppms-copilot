@@ -99,6 +99,7 @@ export function useCopilotGenerate(): UseCopilotGenerateReturn {
           attention: r.attention as SectionOutcome,
           draftNote: r.draftNote as SectionOutcome,
           followUp: r.followUp as SectionOutcome,
+          differentialDiagnosis: r.differentialDiagnosis as SectionOutcome,
         } satisfies CopilotData,
         meta: (r.meta ?? {}) as Record<string, unknown>,
       };
@@ -148,7 +149,7 @@ export function useCopilotGenerate(): UseCopilotGenerateReturn {
 
   const regenerate = useCallback(
     (token: string, visitId: string): void => {
-      // Bypass cache — fresh request for all six sections
+      // Bypass cache — fresh request for all seven sections
       cacheRef.current.delete(visitId);
       void doFetch(token, visitId);
     },

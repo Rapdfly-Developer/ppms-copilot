@@ -310,14 +310,15 @@ export async function buildConsolidatedContext(args: {
 
   let fetched: FetchedContext;
   try {
-    // Fetch everything needed across all 6 MVP capabilities at once:
+    // Fetch everything needed across all 7 consolidated capabilities at once:
     //   demographics: always
-    //   currentVisit: PATIENT_SNAPSHOT, IMPORTANT_CHANGES, NOTE_ASSISTANCE, FOLLOW_UP_SUMMARY
-    //   visitHistory(6): IMPORTANT_CHANGES needs 6; others need 3 — use the max
+    //   currentVisit: PATIENT_SNAPSHOT, IMPORTANT_CHANGES, NOTE_ASSISTANCE, FOLLOW_UP_SUMMARY, DIFFERENTIAL_DIAGNOSIS
+    //   visitHistory(6): IMPORTANT_CHANGES needs 6; others (including DIFFERENTIAL_DIAGNOSIS's 3) need fewer — use the max
     //   appointments(10): TIMELINE_SUMMARY and FOLLOW_UP_SUMMARY
     //   timeline: TIMELINE_SUMMARY
-    // DIFFERENTIAL_DIAGNOSIS is NOT part of this bundle — generated on-demand
-    // via buildPatientContext() through /api/copilot/stream instead.
+    // DIFFERENTIAL_DIAGNOSIS's own narrower data needs (see CAPABILITY_CONFIG)
+    // are already a subset of this superset fetch, so no extra fetch is needed
+    // to fold it in here.
     const [patient, currentVisit, visitHistory, appointments, timeline] = await Promise.all([
       getPatient(token, patientRef),
       getVisit(token, patientRef, visitId),

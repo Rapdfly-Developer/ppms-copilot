@@ -1,8 +1,11 @@
 // Consolidated Copilot generation service.
 //
-// Replaces 6 independent per-capability requests with a single AI call that
-// generates all six MVP sections (snapshot, previousVisits, timeline, attention,
-// draftNote, followUp) as a structured JSON response.
+// Replaces 7 independent per-capability requests with a single AI call that
+// generates all seven sections (snapshot, previousVisits, timeline, attention,
+// draftNote, followUp, differentialDiagnosis) as a structured JSON response.
+// differentialDiagnosis used to run as its own on-demand /api/copilot/stream
+// call, triggered only when the doctor opened that tab — it's now bundled in
+// here like the other 6, so opening a visit costs exactly one AI call.
 //
 // Security invariants:
 //   - patientRef and visitId come from the decoded token ONLY — never from body.
@@ -60,6 +63,7 @@ const SECTION_CAPABILITIES: Record<keyof CopilotData, Capability> = {
   attention: "IMPORTANT_CHANGES",
   draftNote: "NOTE_ASSISTANCE",
   followUp: "FOLLOW_UP_SUMMARY",
+  differentialDiagnosis: "DIFFERENTIAL_DIAGNOSIS",
 };
 
 const SECTION_KEYS = Object.keys(SECTION_CAPABILITIES) as Array<keyof CopilotData>;
@@ -162,7 +166,10 @@ export async function generateCopilot(
     const result = await provider.complete({
       systemPrompt,
       messages: [{ role: "user", content: userMessage }],
-      maxTokens: 5000,
+      // 6000: was 5000 for 6 sections: bumped to give the 7th (differentialDiagnosis)
+      // room without starving whichever key the model emits last — a truncated
+      // JSON response fails to parse for ALL sections, not just the last one.
+      maxTokens: 6000,
       reasoningEffort: "high",
       modelOverride: model,
       responseFormat: "json_object",
@@ -254,6 +261,7 @@ export async function generateCopilot(
     attention: sections.attention ?? errorSection("INTERNAL_ERROR"),
     draftNote: sections.draftNote ?? errorSection("INTERNAL_ERROR"),
     followUp: sections.followUp ?? errorSection("INTERNAL_ERROR"),
+    differentialDiagnosis: sections.differentialDiagnosis ?? errorSection("INTERNAL_ERROR"),
   };
 
   const meta: GenerateMeta = {

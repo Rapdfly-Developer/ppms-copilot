@@ -1,35 +1,28 @@
 "use client";
 
-// Main Copilot application component — consolidated single-request architecture,
-// plus one on-demand capability that deliberately sits outside it.
+// Main Copilot application component — consolidated single-request architecture.
 //
 // Architecture:
-//   - ONE consolidated AI request per visit for the 6 always-shown tabs
-//     (on session arrival or explicit Regenerate)
-//   - Tab clicks among those 6 change activeCapability only — zero AI calls
-//   - All 6 sections served from in-memory result after initial generation
-//   - DIFFERENTIAL_DIAGNOSIS is separate: it never fires automatically. It
-//     generates on-demand, via /api/copilot/stream (useCopilotStream), only
-//     when the doctor explicitly clicks that tab — cached per visitId so a
-//     repeat click within the same visit is instant, not a re-fetch.
+//   - ONE consolidated AI request per visit covers all 7 tabs (on session
+//     arrival or explicit Regenerate)
+//   - Tab clicks only change activeCapability — zero AI calls, every tab's
+//     data is already loaded from the single consolidated request
+//   - All 7 sections served from in-memory result after initial generation
 //
 // State machine:
 //   no-session → awaiting PPMS_INIT
-//   session + idle/loading → generating the 6 consolidated sections
-//   session + done → those 6 tabs available instantly; Differential Dx still
-//     fetches lazily on first click
+//   session + idle/loading → generating the 7 consolidated sections
+//   session + done → all 7 tabs available instantly
 //   session + token-expired → shows expired UI, requests re-issue
 //
 // Security:
 //   - Token lives only in React state (memory), never persisted.
-//   - Regenerate issues one new consolidated request, and invalidates (but
-//     does not eagerly re-fetch) any cached Differential Dx result.
+//   - Regenerate issues one new consolidated request covering all 7 sections.
 //   - Draft text is editable before confirmation — never auto-saved.
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { usePostMessage } from "@/hooks/usePostMessage";
 import { useCopilotGenerate } from "@/hooks/useCopilotGenerate";
-import { useCopilotStream } from "@/hooks/useCopilotStream";
 import { CapabilitySelector } from "@/components/CapabilitySelector";
 import { ResponseArea } from "@/components/ResponseArea";
 import { ActionBar } from "@/components/ActionBar";
@@ -38,10 +31,16 @@ import { MAX_TOKEN_LIFETIME_MS } from "@/lib/constants";
 import type { Capability, StreamState, CopilotGenerateState, SectionOutcome } from "@/types/client";
 
 // ── Capability → section key mapping ─────────────────────────────────────────
-// Covers only the 6 consolidated tabs — DIFFERENTIAL_DIAGNOSIS is handled
-// separately via useCopilotStream and never looked up here.
+// Covers all 7 consolidated tabs.
 
-type SectionKey = "snapshot" | "previousVisits" | "timeline" | "attention" | "draftNote" | "followUp";
+type SectionKey =
+  | "snapshot"
+  | "previousVisits"
+  | "timeline"
+  | "attention"
+  | "draftNote"
+  | "followUp"
+  | "differentialDiagnosis";
 
 const CAPABILITY_TO_SECTION: Partial<Record<Capability, SectionKey>> = {
   PATIENT_SNAPSHOT: "snapshot",
@@ -50,6 +49,7 @@ const CAPABILITY_TO_SECTION: Partial<Record<Capability, SectionKey>> = {
   IMPORTANT_CHANGES: "attention",
   NOTE_ASSISTANCE: "draftNote",
   FOLLOW_UP_SUMMARY: "followUp",
+  DIFFERENTIAL_DIAGNOSIS: "differentialDiagnosis",
 };
 
 // Converts the consolidated state + active capability into the StreamState
@@ -307,8 +307,6 @@ function Disclaimer() {
 export default function CopilotApp() {
   const { session, confirmDraft, requestTokenRefresh } = usePostMessage();
   const { state, generate, regenerate, cancel } = useCopilotGenerate();
-  // Separate, on-demand pipeline for Differential Dx only — see module doc above.
-  const differentialStream = useCopilotStream();
   const [activeCapability, setActiveCapability] = useState<Capability>("PATIENT_SNAPSHOT");
   const [draftText, setDraftText] = useState("");
   const [draftConfirmed, setDraftConfirmed] = useState(false);
@@ -322,7 +320,7 @@ export default function CopilotApp() {
     if (session.initiatedAt === sessionStartedRef.current) return;
     sessionStartedRef.current = session.initiatedAt;
 
-    // New visit → reset UI state, then generate all six sections at once.
+    // New visit → reset UI state, then generate all seven sections at once.
     setActiveCapability("PATIENT_SNAPSHOT");
     setDraftText("");
     setDraftConfirmed(false);
@@ -356,32 +354,15 @@ export default function CopilotApp() {
   const capConfig = CAPABILITY_CONFIG[activeCapability];
   const isLoading = state.status === "loading";
 
-  // Tab clicks among the 6 consolidated tabs ONLY change the active tab — no
-  // AI calls. DIFFERENTIAL_DIAGNOSIS is the one exception: it triggers an
-  // on-demand fetch, but only the first time it's opened for this visit —
-  // useCopilotStream's own cache (keyed by visitId) makes every click after
-  // the first one instant, with no network call.
+  // Tab clicks among all 7 consolidated tabs ONLY change the active tab — no
+  // AI calls. Every tab's data is already loaded from the single consolidated
+  // request that fired when the session arrived.
   const selectCapability = useCallback(
     (cap: Capability) => {
       if (isLoading) return;
       setActiveCapability(cap);
       setDraftText("");
       setDraftConfirmed(false);
-
-      if (cap === "DIFFERENTIAL_DIAGNOSIS") {
-        const alreadyInFlight =
-          differentialStream.state.status === "loading" ||
-          differentialStream.state.status === "streaming";
-        if (session && !alreadyInFlight) {
-          void differentialStream.start(
-            "DIFFERENTIAL_DIAGNOSIS",
-            session.token,
-            undefined,
-            session.visitId,
-          );
-        }
-        return;
-      }
 
       // If switching to a draft capability and data is already loaded, sync text.
       if (state.status === "done") {
@@ -395,7 +376,7 @@ export default function CopilotApp() {
         }
       }
     },
-    [isLoading, state, session, differentialStream],
+    [isLoading, state],
   );
 
   const handleConfirmDraft = useCallback(() => {
@@ -406,32 +387,16 @@ export default function CopilotApp() {
     setDraftConfirmed(true);
   }, [session, draftText, draftConfirmed, capConfig.draftType, confirmDraft]);
 
-  // Regenerate: one new consolidated request for the 6 bundled sections, plus
-  // invalidating any cached Differential Dx result. That result is NOT eagerly
-  // re-fetched unless Differential Dx is the tab currently being viewed —
-  // otherwise it simply re-fetches fresh the next time that tab is opened.
+  // Regenerate: one new consolidated request covering all 7 bundled sections.
   const handleRegenerate = useCallback(() => {
     if (!session) return;
     setDraftText("");
     setDraftConfirmed(false);
-    differentialStream.clearCache();
-    if (activeCapability === "DIFFERENTIAL_DIAGNOSIS") {
-      void differentialStream.start(
-        "DIFFERENTIAL_DIAGNOSIS",
-        session.token,
-        undefined,
-        session.visitId,
-      );
-    }
     regenerate(session.token, session.visitId);
-  }, [session, regenerate, activeCapability, differentialStream]);
+  }, [session, regenerate]);
 
-  // Derive per-tab stream state. DIFFERENTIAL_DIAGNOSIS reads from its own
-  // on-demand hook instead of the consolidated result — no AI calls either way.
-  const sectionStreamState: StreamState =
-    activeCapability === "DIFFERENTIAL_DIAGNOSIS"
-      ? differentialStream.state
-      : toStreamState(state, activeCapability);
+  // Derive per-tab stream state from the single consolidated result.
+  const sectionStreamState: StreamState = toStreamState(state, activeCapability);
 
   return (
     <div className="flex flex-col h-screen bg-white overflow-hidden">
@@ -480,9 +445,7 @@ export default function CopilotApp() {
             }
             onConfirmDraft={handleConfirmDraft}
             onRegenerate={handleRegenerate}
-            onCancel={
-              activeCapability === "DIFFERENTIAL_DIAGNOSIS" ? differentialStream.cancel : cancel
-            }
+            onCancel={cancel}
           />
 
           <Disclaimer />

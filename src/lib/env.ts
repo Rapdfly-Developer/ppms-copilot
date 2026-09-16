@@ -50,7 +50,7 @@ export function getPpmsCoreUrl(): string {
 
 export function getAiModel(): string {
   if (process.env.AI_MODEL?.trim()) return process.env.AI_MODEL.trim();
-  return getAiProvider() === "anthropic" ? "claude-opus-5" : "llama-3.1-8b-instant";
+  return getAiProvider() === "anthropic" ? "claude-opus-5" : "openai/gpt-oss-20b";
 }
 
 export function getAiTimeoutMs(): number {
@@ -68,12 +68,13 @@ export function getCopilotFastModel(): string {
   return process.env.COPILOT_FAST_MODEL?.trim() || getAiModel();
 }
 
-// Reasoning model defaults to llama-3.3-70b-versatile — higher Groq rate limits
-// than openai/gpt-oss-120b while still providing strong analytical capability.
-// Override with COPILOT_REASONING_MODEL env var.
+// Reasoning model defaults to openai/gpt-oss-120b — Groq's recommended
+// replacement after decommissioning the llama-3.1-8b-instant / llama-3.3-70b-versatile
+// models this app previously defaulted to (August 2026). Override with
+// COPILOT_REASONING_MODEL env var.
 export function getCopilotReasoningModel(): string {
   if (process.env.COPILOT_REASONING_MODEL?.trim()) return process.env.COPILOT_REASONING_MODEL.trim();
   // If AI_MODEL is explicitly set, use it for both tiers
   if (process.env.AI_MODEL?.trim()) return process.env.AI_MODEL.trim();
-  return getAiProvider() === "anthropic" ? "claude-opus-5" : "llama-3.3-70b-versatile";
+  return getAiProvider() === "anthropic" ? "claude-opus-5" : "openai/gpt-oss-120b";
 }
