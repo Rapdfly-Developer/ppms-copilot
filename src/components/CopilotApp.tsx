@@ -420,12 +420,6 @@ export default function CopilotApp() {
             disabled={isLoading}
           />
 
-          {/* Capability description */}
-          <div className="shrink-0 px-4 pt-3 pb-2">
-            <h2 className="text-xs font-semibold text-gray-800">{capConfig.label}</h2>
-            <p className="text-xs text-gray-400 mt-0.5">{capConfig.description}</p>
-          </div>
-
           <ResponseArea
             state={sectionStreamState}
             isDraft={capConfig.producesDraft}

@@ -13,14 +13,14 @@ const MVP_CAPABILITIES: Capability[] = [
   "DIFFERENTIAL_DIAGNOSIS",
 ];
 
-// Short tab labels for the horizontal bar.
+// Short tab labels — kept concise for horizontal nav at narrow widths.
 const TAB_LABELS: Partial<Record<Capability, string>> = {
-  PATIENT_SNAPSHOT: "Snapshot",
-  PREVIOUS_VISIT_SUMMARY: "Previous Visits",
-  TIMELINE_SUMMARY: "Timeline",
-  IMPORTANT_CHANGES: "Attention",
-  NOTE_ASSISTANCE: "Draft Note",
-  FOLLOW_UP_SUMMARY: "Follow-up",
+  PATIENT_SNAPSHOT:       "Snapshot",
+  PREVIOUS_VISIT_SUMMARY: "Prev. Visits",
+  TIMELINE_SUMMARY:       "Timeline",
+  IMPORTANT_CHANGES:      "Attention",
+  NOTE_ASSISTANCE:        "Draft Note",
+  FOLLOW_UP_SUMMARY:      "Follow-up",
   DIFFERENTIAL_DIAGNOSIS: "Differential Dx",
 };
 
@@ -34,34 +34,48 @@ export function CapabilitySelector({ active, onSelect, disabled }: CapabilitySel
   return (
     <nav
       aria-label="AI capabilities"
-      className="shrink-0 border-b border-gray-200 bg-white px-3"
+      className="shrink-0 bg-white"
+      style={{ borderBottom: "1px solid #e2e8f0" }}
     >
       <ul
-        className="flex gap-1 overflow-x-auto scrollbar-none py-2"
-        role="list"
-        style={{ scrollbarWidth: "none" }}
+        role="tablist"
+        className="flex overflow-x-auto"
+        style={{ scrollbarWidth: "none", msOverflowStyle: "none" } as React.CSSProperties}
       >
-        {MVP_CAPABILITIES.map((cap) => {
+        {MVP_CAPABILITIES.map(cap => {
           const isActive = cap === active;
           const label = TAB_LABELS[cap] ?? CAPABILITY_CONFIG[cap].label;
+
           return (
-            <li key={cap} className="shrink-0">
+            <li key={cap} role="none" className="shrink-0">
               <button
                 type="button"
-                onClick={() => !disabled && onSelect(cap)}
-                aria-current={isActive ? "page" : undefined}
+                role="tab"
+                aria-selected={isActive}
                 aria-disabled={disabled}
                 disabled={disabled}
+                onClick={() => !disabled && onSelect(cap)}
                 className={[
-                  "px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors",
-                  "focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-500",
+                  "relative flex items-center whitespace-nowrap px-3 py-2.5",
+                  "text-[11.5px] font-medium transition-colors duration-150",
+                  "focus:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-teal-400",
                   isActive
-                    ? "bg-teal-600 text-white shadow-sm"
-                    : "bg-gray-100 text-gray-600 hover:bg-gray-200 hover:text-gray-900",
-                  disabled && !isActive ? "opacity-40 cursor-not-allowed" : "cursor-pointer",
+                    ? "text-teal-700"
+                    : disabled
+                      ? "text-slate-400 cursor-not-allowed"
+                      : "text-slate-500 hover:text-slate-700 hover:bg-slate-50 cursor-pointer",
                 ].join(" ")}
               >
                 {label}
+
+                {/* Active underline indicator */}
+                {isActive && (
+                  <span
+                    aria-hidden="true"
+                    className="absolute bottom-0 left-0 right-0 bg-teal-600"
+                    style={{ height: "2px", borderRadius: "2px 2px 0 0" }}
+                  />
+                )}
               </button>
             </li>
           );
