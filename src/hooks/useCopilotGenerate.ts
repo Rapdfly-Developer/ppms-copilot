@@ -100,6 +100,10 @@ export function useCopilotGenerate(): UseCopilotGenerateReturn {
           draftNote: r.draftNote as SectionOutcome,
           followUp: r.followUp as SectionOutcome,
           differentialDiagnosis: r.differentialDiagnosis as SectionOutcome,
+          medications: r.medications as SectionOutcome,
+          investigations: r.investigations as SectionOutcome,
+          assessmentContext: r.assessmentContext as SectionOutcome,
+          suggestedQuestions: r.suggestedQuestions as SectionOutcome,
         } satisfies CopilotData,
         meta: (r.meta ?? {}) as Record<string, unknown>,
       };

@@ -95,6 +95,11 @@ const SAFE_OTHER_SECTIONS = {
     "## Subjective:\nStable per documentation.\n## Objective:\nStable per documentation.\n" +
     "## Assessment:\nStable per documentation.\n## Plan:\nContinue as documented.",
   followUp: "Documented follow-up plan continues as previously recorded.",
+  medications: "No medications documented at this visit.",
+  investigations: "No investigations documented in the record.",
+  assessmentContext:
+    "## Current Diagnoses\nNo diagnoses documented.\n\n## Clinical Status Summary\nNo diagnoses or clinical context documented at this visit.",
+  suggestedQuestions: "No significant documentation gaps identified.",
 };
 
 // Builds the raw JSON text the mock AI "returns" for the consolidated call —

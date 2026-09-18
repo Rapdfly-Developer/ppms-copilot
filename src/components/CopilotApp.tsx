@@ -31,7 +31,7 @@ import { MAX_TOKEN_LIFETIME_MS } from "@/lib/constants";
 import type { Capability, StreamState, CopilotGenerateState, SectionOutcome } from "@/types/client";
 
 // ── Capability → section key mapping ─────────────────────────────────────────
-// Covers all 7 consolidated tabs.
+// Covers all 11 consolidated tabs.
 
 type SectionKey =
   | "snapshot"
@@ -40,16 +40,24 @@ type SectionKey =
   | "attention"
   | "draftNote"
   | "followUp"
-  | "differentialDiagnosis";
+  | "differentialDiagnosis"
+  | "medications"
+  | "investigations"
+  | "assessmentContext"
+  | "suggestedQuestions";
 
 const CAPABILITY_TO_SECTION: Partial<Record<Capability, SectionKey>> = {
-  PATIENT_SNAPSHOT: "snapshot",
+  PATIENT_SNAPSHOT:       "snapshot",
   PREVIOUS_VISIT_SUMMARY: "previousVisits",
-  TIMELINE_SUMMARY: "timeline",
-  IMPORTANT_CHANGES: "attention",
-  NOTE_ASSISTANCE: "draftNote",
-  FOLLOW_UP_SUMMARY: "followUp",
+  TIMELINE_SUMMARY:       "timeline",
+  IMPORTANT_CHANGES:      "attention",
+  NOTE_ASSISTANCE:        "draftNote",
+  FOLLOW_UP_SUMMARY:      "followUp",
   DIFFERENTIAL_DIAGNOSIS: "differentialDiagnosis",
+  MEDICATIONS_SUMMARY:    "medications",
+  INVESTIGATIONS_SUMMARY: "investigations",
+  ASSESSMENT_CONTEXT:     "assessmentContext",
+  SUGGESTED_QUESTIONS:    "suggestedQuestions",
 };
 
 // Converts the consolidated state + active capability into the StreamState

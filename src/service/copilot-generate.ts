@@ -65,6 +65,10 @@ const SECTION_CAPABILITIES: Record<keyof CopilotData, Capability> = {
   draftNote: "NOTE_ASSISTANCE",
   followUp: "FOLLOW_UP_SUMMARY",
   differentialDiagnosis: "DIFFERENTIAL_DIAGNOSIS",
+  medications: "MEDICATIONS_SUMMARY",
+  investigations: "INVESTIGATIONS_SUMMARY",
+  assessmentContext: "ASSESSMENT_CONTEXT",
+  suggestedQuestions: "SUGGESTED_QUESTIONS",
 };
 
 const SECTION_KEYS = Object.keys(SECTION_CAPABILITIES) as Array<keyof CopilotData>;
@@ -285,6 +289,10 @@ export async function generateCopilot(
     draftNote: sections.draftNote ?? errorSection("INTERNAL_ERROR"),
     followUp: sections.followUp ?? errorSection("INTERNAL_ERROR"),
     differentialDiagnosis: sections.differentialDiagnosis ?? errorSection("INTERNAL_ERROR"),
+    medications: sections.medications ?? errorSection("INTERNAL_ERROR"),
+    investigations: sections.investigations ?? errorSection("INTERNAL_ERROR"),
+    assessmentContext: sections.assessmentContext ?? errorSection("INTERNAL_ERROR"),
+    suggestedQuestions: sections.suggestedQuestions ?? errorSection("INTERNAL_ERROR"),
   };
 
   const meta: GenerateMeta = {

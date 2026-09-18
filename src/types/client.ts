@@ -15,6 +15,10 @@ export type CopilotData = {
   draftNote: SectionOutcome;
   followUp: SectionOutcome;
   differentialDiagnosis: SectionOutcome;
+  medications: SectionOutcome;
+  investigations: SectionOutcome;
+  assessmentContext: SectionOutcome;
+  suggestedQuestions: SectionOutcome;
 };
 
 export type CopilotGenerateState =
@@ -32,6 +36,10 @@ export type Capability =
   | "NOTE_ASSISTANCE"
   | "FOLLOW_UP_SUMMARY"
   | "DIFFERENTIAL_DIAGNOSIS"
+  | "MEDICATIONS_SUMMARY"
+  | "INVESTIGATIONS_SUMMARY"
+  | "ASSESSMENT_CONTEXT"
+  | "SUGGESTED_QUESTIONS"
   | "QUESTION";
 
 // Token stored only in memory — never in localStorage or cookies.
