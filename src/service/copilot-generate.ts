@@ -257,7 +257,10 @@ export async function generateCopilot(
         code: validation.code,
       });
     } else {
-      sections[key] = { ok: true, text: raw, warnings: validation.warnings };
+      // Some models double-escape newlines inside json_object responses, emitting
+      // literal \n (two chars) instead of a real newline. Normalise before storing.
+      const normalised = raw.replace(/\\n/g, "\n").replace(/\\t/g, "\t");
+      sections[key] = { ok: true, text: normalised, warnings: validation.warnings };
       sectionResults[key] = validation.warnings.length > 0 ? "ok_with_warnings" : "ok";
     }
   }
