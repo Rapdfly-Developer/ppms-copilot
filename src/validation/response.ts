@@ -273,9 +273,9 @@ function validateDifferentialDiagnosis(sanitised: string): ValidationResult | nu
   }
 
   const section = extractConsiderationsSection(sanitised);
-  const blocks = section.split(/\n\s*\n/).map((b) => b.trim()).filter(Boolean);
+  const rawBlocks = section.split(/\n\s*\n/).map((b) => b.trim()).filter(Boolean);
 
-  if (blocks.length === 0) {
+  if (rawBlocks.length === 0) {
     return {
       ok: false,
       reason: "Response contains no diagnostic considerations and no insufficient-evidence sentence",
@@ -287,8 +287,31 @@ function validateDifferentialDiagnosis(sanitised: string): ValidationResult | nu
   // fixed insufficient-evidence sentence — nothing else alongside it. A
   // second block (even a malformed fragment) alongside the sentence must
   // still fail closed rather than being masked by the valid refusal.
-  if (blocks.length === 1 && blocks[0] === DIFFERENTIAL_NO_EVIDENCE_SENTENCE) {
+  if (rawBlocks.length === 1 && rawBlocks[0] === DIFFERENTIAL_NO_EVIDENCE_SENTENCE) {
     return null;
+  }
+
+  // Merge orphaned tail fragments caused by blank lines within a block.
+  // When the model generates differentialDiagnosis as one JSON string value
+  // inside the larger consolidated response, it sometimes inserts a blank line
+  // between the reason and the Confidence / Source field (picking up the
+  // spaced-paragraph style it uses elsewhere in the same document). Splitting
+  // by blank lines then splits a valid block in two: the tail fragment starts
+  // with "Confidence:" or "Source:", which is never a valid block opener — so
+  // we re-attach it to the block that preceded it rather than rejecting both.
+  // Two blocks that ran together WITHOUT a blank line remain a single raw block
+  // and are still rejected by parseConsiderationBlock's trailing.length > 1
+  // check, so this merge only affects the genuine blank-line-within-block case.
+  const blocks: string[] = [];
+  for (const raw of rawBlocks) {
+    const firstLine = raw.split("\n")[0].trim();
+    const isOrphanedTail =
+      /^Confidence:\s*(Low|Moderate)/i.test(firstLine) || /^Source:\s/i.test(firstLine);
+    if (isOrphanedTail && blocks.length > 0) {
+      blocks[blocks.length - 1] += "\n" + raw;
+    } else {
+      blocks.push(raw);
+    }
   }
 
   // A single well-formed block is a fully valid response — no minimum count.

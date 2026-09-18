@@ -202,6 +202,30 @@ Documented photophobia and eye pain are consistent with
 anterior segment inflammation, warranting consideration.
 Confidence: Moderate`;
 
+// 17. Blank line WITHIN a block between reason and Confidence — the model
+// inserts this when generating differentialDiagnosis as one JSON value inside
+// the larger 7-section consolidated response, picking up the spaced-paragraph
+// style it uses elsewhere in the same document. Must pass: the orphaned tail
+// fragment (starting with "Confidence:") is re-attached to its preceding block.
+const BLANK_LINE_WITHIN_BLOCK = `**Anterior uveitis**
+Documented photophobia and eye pain are consistent with anterior segment inflammation.
+
+Confidence: Moderate
+Source: V0 2024-06-15`;
+
+// 18. Blank line within EACH block of a multi-item list — both are re-attached
+// and both must pass independently.
+const BLANK_LINE_WITHIN_EACH_BLOCK = `**Anterior uveitis**
+Documented photophobia and eye pain are consistent with anterior segment inflammation.
+
+Confidence: Moderate
+Source: V0 2024-06-15
+
+**Early cataract changes**
+Gradual blurring of vision is a general pattern consistent with early lens changes.
+
+Confidence: Low`;
+
 // 14. An abandoned/malformed fragment alongside the exact refusal sentence —
 // the fragment must not be able to hide behind a valid refusal elsewhere in
 // the same section. Fail closed rather than letting noEvidence short-circuit.
@@ -424,6 +448,28 @@ describe("DIFFERENTIAL_DIAGNOSIS capability (consolidated path)", () => {
       expect(result.data.attention.ok).toBe(true);
       expect(result.data.draftNote.ok).toBe(true);
       expect(result.data.followUp.ok).toBe(true);
+    }
+  });
+
+  it("17. blank line within a block between reason and Confidence is tolerated — orphaned tail is re-attached", async () => {
+    setProvider(makeMockProvider(buildConsolidatedResponseText(BLANK_LINE_WITHIN_BLOCK)));
+
+    const result = await generate();
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.differentialDiagnosis.ok).toBe(true);
+    }
+  });
+
+  it("18. blank line within each block of a multi-item list — all blocks re-attached and pass", async () => {
+    setProvider(makeMockProvider(buildConsolidatedResponseText(BLANK_LINE_WITHIN_EACH_BLOCK)));
+
+    const result = await generate();
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.differentialDiagnosis.ok).toBe(true);
     }
   });
 
