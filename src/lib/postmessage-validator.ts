@@ -95,5 +95,13 @@ export function validateRequestExamGuidanceMessage(
     return { ok: false, reason: "visit_mismatch" };
   }
 
+  // token is OPTIONAL — but if present, it must be a genuine non-empty
+  // string. Fail closed on a malformed-but-present token rather than silently
+  // falling back to the (possibly expired) session token, which would mask
+  // a real PPMS Core bug as an auth failure two steps later.
+  if (data.token !== undefined && (typeof data.token !== "string" || !data.token.trim())) {
+    return { ok: false, reason: "invalid_token" };
+  }
+
   return { ok: true, message: data as unknown as PpmsRequestExamGuidanceMessage };
 }

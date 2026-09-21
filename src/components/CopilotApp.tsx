@@ -25,10 +25,13 @@
 //     differential-diagnosis card outside this iframe.
 //   - EXAM_GUIDANCE is a SEPARATE, on-demand-only request — not part of the
 //     consolidated call. PPMS Core triggers it via PPMS_REQUEST_EXAM_GUIDANCE
-//     (e.g. a button on the General/Ophthalmic tabs); this component runs it
-//     through its own useCopilotStream instance and reports the result back
-//     via PLUGIN_EXAM_GUIDANCE_RESULT — visitId + the segment list only, no
-//     token, same posture as PLUGIN_DIFFERENTIAL_UPDATE.
+//     (e.g. a button on the General/Ophthalmic tabs), optionally carrying a
+//     FRESH plugin token minted for this specific trigger — used in place of
+//     the original (possibly since-expired) PPMS_INIT session token, see
+//     lib/on-demand-token.ts. This component runs the request through its own
+//     useCopilotStream instance and reports the result back via
+//     PLUGIN_EXAM_GUIDANCE_RESULT — visitId + the segment list only, no
+//     token in that OUTBOUND message, same posture as PLUGIN_DIFFERENTIAL_UPDATE.
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { usePostMessage } from "@/hooks/usePostMessage";
@@ -40,6 +43,7 @@ import { ActionBar } from "@/components/ActionBar";
 import { CAPABILITY_CONFIG } from "@/capabilities";
 import { MAX_TOKEN_LIFETIME_MS } from "@/lib/constants";
 import { decideDifferentialUpdate } from "@/lib/differential-update";
+import { resolveOnDemandToken } from "@/lib/on-demand-token";
 import type { Capability, StreamState, CopilotGenerateState, SectionOutcome } from "@/types/client";
 
 // ── Capability → section key mapping ─────────────────────────────────────────
@@ -390,11 +394,18 @@ export default function CopilotApp() {
   // Separate request/hook from the consolidated flow above — no cacheKey, so
   // every trigger regenerates fresh (the General tab's documentation can
   // change between triggers within the same visit).
+  //
+  // Uses the FRESH token PPMS Core mints for this specific trigger when one
+  // is provided, never the original PPMS_INIT session token unconditionally
+  // — that token has a hard 10-minute server-side expiry, and an on-demand
+  // trigger can easily arrive well after that. Falls back to the session
+  // token only if the trigger didn't carry one (see lib/on-demand-token.ts).
   useEffect(() => {
     if (!examGuidanceRequest || !session) return;
     if (examGuidanceTriggeredForRef.current === examGuidanceRequest.requestedAt) return;
     examGuidanceTriggeredForRef.current = examGuidanceRequest.requestedAt;
-    examGuidanceStream.start("EXAM_GUIDANCE", session.token);
+    const token = resolveOnDemandToken(examGuidanceRequest.token, session.token);
+    examGuidanceStream.start("EXAM_GUIDANCE", token);
   }, [examGuidanceRequest, session, examGuidanceStream]);
 
   // Report the on-demand result back to PPMS Core once it settles, whether it

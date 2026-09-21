@@ -33,14 +33,21 @@ export type PpmsInitMessage = {
 };
 
 // Sent by PPMS Core (e.g. a button on the General/Ophthalmic tabs) to request
-// an on-demand EXAM_GUIDANCE generation. No token — the plugin already holds
-// one in memory from PPMS_INIT for the current session; this message only
-// needs to identify which visit the request is for, so the handler can
-// confirm it matches the session already established.
+// an on-demand EXAM_GUIDANCE generation.
+//
+// `token` is OPTIONAL and, when present, is a FRESH plugin token PPMS Core
+// mints (via POST /api/v1/plugin-token) immediately before sending this
+// trigger — not the original PPMS_INIT session token, which has a hard
+// 10-minute server-side expiry (MAX_TOKEN_LIFETIME_SECONDS) and may well have
+// already lapsed by the time an on-demand capability is triggered deep into
+// a visit. Absent for backward compatibility with a PPMS Core build that
+// doesn't send one yet — the handler falls back to the session token in that
+// case (see lib/on-demand-token.ts).
 export type PpmsRequestExamGuidanceMessage = {
   type: typeof MSG_PPMS_REQUEST_EXAM_GUIDANCE;
   pluginId: string;
   visitId: string;
+  token?: string;
 };
 
 export type InboundPluginMessage = PpmsInitMessage | PpmsRequestExamGuidanceMessage;

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { validatePpmsInitMessage } from "@/lib/postmessage-validator";
+import { validatePpmsInitMessage, validateRequestExamGuidanceMessage } from "@/lib/postmessage-validator";
 
 const EXPECTED_ORIGIN = "https://ppmsai.com";
 
@@ -201,5 +201,66 @@ describe("validatePpmsInitMessage — token expiry handling contract", () => {
     // postMessage validator accepts any non-empty token string.
     // Expiry rejection happens in parseRequest (server side).
     expect(result.ok).toBe(true);
+  });
+});
+
+describe("validateRequestExamGuidanceMessage — fresh-token field", () => {
+  const CURRENT_VISIT_ID = "visit-001";
+
+  function makeExamGuidanceMessage(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      type: "PPMS_REQUEST_EXAM_GUIDANCE",
+      pluginId: "ppms.plugin.ai-clinical-copilot",
+      visitId: CURRENT_VISIT_ID,
+      ...overrides,
+    };
+  }
+
+  it("accepts a message with a fresh token and passes it through unchanged", () => {
+    const result = validateRequestExamGuidanceMessage(
+      EXPECTED_ORIGIN,
+      makeExamGuidanceMessage({ token: "fresh-token-abc" }),
+      EXPECTED_ORIGIN,
+      CURRENT_VISIT_ID,
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.message.token).toBe("fresh-token-abc");
+  });
+
+  it("accepts a message with no token at all (backward compatibility)", () => {
+    const result = validateRequestExamGuidanceMessage(
+      EXPECTED_ORIGIN,
+      makeExamGuidanceMessage(),
+      EXPECTED_ORIGIN,
+      CURRENT_VISIT_ID,
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.message.token).toBeUndefined();
+  });
+
+  it("rejects a message whose token is present but not a string", () => {
+    const result = validateRequestExamGuidanceMessage(
+      EXPECTED_ORIGIN,
+      makeExamGuidanceMessage({ token: 12345 }),
+      EXPECTED_ORIGIN,
+      CURRENT_VISIT_ID,
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("invalid_token");
+  });
+
+  it("rejects a message whose token is present but empty/whitespace-only", () => {
+    const result = validateRequestExamGuidanceMessage(
+      EXPECTED_ORIGIN,
+      makeExamGuidanceMessage({ token: "   " }),
+      EXPECTED_ORIGIN,
+      CURRENT_VISIT_ID,
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("invalid_token");
   });
 });

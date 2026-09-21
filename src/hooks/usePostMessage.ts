@@ -39,8 +39,11 @@ const PPMS_ORIGIN = process.env.NEXT_PUBLIC_PPMS_ORIGIN ?? "";
 // One PPMS_REQUEST_EXAM_GUIDANCE received. requestedAt (Date.now()) is a
 // change-detection key for the consuming effect — distinct from visitId
 // because the doctor could trigger the same visit's exam guidance more than
-// once (e.g. after documenting more of the General tab).
-export type ExamGuidanceRequest = { visitId: string; requestedAt: number };
+// once (e.g. after documenting more of the General tab). `token`, when
+// present, is the fresh plugin token PPMS Core minted for this specific
+// trigger — see lib/on-demand-token.ts for why the consumer must prefer it
+// over the original session token.
+export type ExamGuidanceRequest = { visitId: string; token?: string; requestedAt: number };
 
 export type ExamGuidanceResult =
   | { ok: true; sections: ExamGuidanceSection[] }
@@ -118,7 +121,11 @@ export function usePostMessage(): UsePostMessageReturn {
         sessionRef.current?.visitId ?? null,
       );
       if (examResult.ok) {
-        setExamGuidanceRequest({ visitId: examResult.message.visitId, requestedAt: Date.now() });
+        setExamGuidanceRequest({
+          visitId: examResult.message.visitId,
+          token: examResult.message.token,
+          requestedAt: Date.now(),
+        });
       }
     }
 
