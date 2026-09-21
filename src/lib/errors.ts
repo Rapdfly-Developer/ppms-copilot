@@ -24,6 +24,7 @@ export const ERROR_CODES = {
   RESPONSE_UNSAFE: "RESPONSE_UNSAFE",
   NOTE_INCOMPLETE: "NOTE_INCOMPLETE",
   DIFFERENTIAL_STRUCTURE_INVALID: "DIFFERENTIAL_STRUCTURE_INVALID",
+  EXAM_GUIDANCE_STRUCTURE_INVALID: "EXAM_GUIDANCE_STRUCTURE_INVALID",
   INVALID_CAPABILITY: "INVALID_CAPABILITY",
   MISSING_PERMISSION: "MISSING_PERMISSION",
   INVALID_REQUEST: "INVALID_REQUEST",
@@ -65,6 +66,8 @@ export const USER_MESSAGES: Record<ErrorCode, string> = {
   NOTE_INCOMPLETE: "AI note draft is missing required sections. Please try again.",
   DIFFERENTIAL_STRUCTURE_INVALID:
     "AI response did not follow the required differential format. Please try again.",
+  EXAM_GUIDANCE_STRUCTURE_INVALID:
+    "AI response did not follow the required exam guidance format. Please try again.",
   INVALID_CAPABILITY: "Invalid capability requested.",
   MISSING_PERMISSION: "You do not have permission to use this feature.",
   INVALID_REQUEST: "Invalid request. Please try again.",

@@ -104,6 +104,8 @@ function renderVisit(visit: VisitDTO, label: string): string {
     lines.push(`Allergies: ${visit.allergies}`);
   }
 
+  if (visit.reportedMedications) lines.push(`Reported medications: ${visit.reportedMedications}`);
+
   if (visit.vitals) {
     const v = visit.vitals;
     const parts: string[] = [];

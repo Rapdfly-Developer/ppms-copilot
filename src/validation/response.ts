@@ -16,7 +16,7 @@
 // the first). Both layers must always be present and neither can be bypassed.
 
 import type { Capability } from "@/capabilities";
-import type { DifferentialDiagnosisItem } from "@/types/client";
+import type { DifferentialDiagnosisItem, ExamGuidanceSection } from "@/types/client";
 
 // ── Pre-sanitiser ─────────────────────────────────────────────────────────────
 // Rewrites benign documentary phrases that incidentally match a forbidden
@@ -371,8 +371,157 @@ function validateDifferentialDiagnosis(sanitised: string): DifferentialValidatio
   return { ok: true, items };
 }
 
+// ── EXAM_GUIDANCE structural + imperative-language requirements ─────────────
+// The prompt locks the model to exactly two fixed segment blocks — Anterior
+// Segment, then Posterior Segment — each with a Documented line and an
+// Associated-findings line. This is a documentary correlation, never an
+// instruction, so imperative openers ("Check", "Assess", ...) are a hard
+// reject independent of block structure, same enforcement position as
+// DIFFERENTIAL_CERTAINTY_PATTERNS above.
+
+const EXAM_GUIDANCE_SEGMENTS = ["Anterior Segment", "Posterior Segment"] as const;
+
+const EXAM_GUIDANCE_NO_DATA_SENTENCE =
+  "The documented record does not contain sufficient findings to correlate exam guidance at this time.";
+
+// Whole-word matched anywhere in the section — deliberately not anchored to
+// sentence-start position. This is intentionally broader than it needs to be
+// (e.g. "in order to" or "the investigation was ordered" would also trip
+// "Order"), trading a theoretical false-positive for a simpler, unambiguous
+// rule given this capability's narrow, current-visit-only data scope makes
+// such incidental collisions unlikely in practice.
+const EXAM_GUIDANCE_IMPERATIVE_PATTERNS: RegExp[] = [
+  /\bCheck\b/i,
+  /\bExamine\b/i,
+  /\bLook for\b/i,
+  /\bAssess\b/i,
+  /\bRule out\b/i,
+  /\bPerform\b/i,
+  /\bTest for\b/i,
+  /\bEvaluate\b/i,
+  /\bOrder\b/i,
+  /\bScreen for\b/i,
+  /\bInvestigate\b/i,
+];
+
+// Tolerates a stray leading "## ..." heading line, same defense-in-depth
+// reasoning as extractConsiderationsSection above: this text is embedded as
+// one JSON string value alongside sections that DO use "##" headers, so a
+// model can pick up that habit here too even though the prompt doesn't ask
+// for a heading.
+function extractExamGuidanceSection(text: string): string {
+  let body = text.trim();
+  const leadingHeadingMatch = body.match(/^##[^\n]*\n/);
+  if (leadingHeadingMatch) {
+    body = body.slice(leadingHeadingMatch[0].length).trim();
+  }
+  return body;
+}
+
+// Parses one segment block against the exact field order the prompt
+// specifies: a "[Segment Name]" opener line, "Documented: ..." line, and
+// "Associated findings not yet documented this visit: ..." line. Either field
+// may wrap across multiple hard-newlined lines (same realistic model drift as
+// DIFFERENTIAL_DIAGNOSIS's reason line — see parseConsiderationBlock above) —
+// forward-scan for the Associated-findings line and treat everything between
+// the opener and that line, however many lines, as Documented.
+function parseExamGuidanceBlock(block: string, expectedSegment: string): ExamGuidanceSection | null {
+  const lines = block.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
+  if (lines.length < 3) return null;
+
+  const segmentMatch = lines[0].match(/^\[(.+)\]$/);
+  if (!segmentMatch || segmentMatch[1].trim() !== expectedSegment) return null;
+
+  const associatedIndex = lines.findIndex(
+    (l, idx) => idx >= 1 && /^Associated findings not yet documented this visit:/i.test(l),
+  );
+  if (associatedIndex === -1) return null;
+
+  const documentedLines = lines.slice(1, associatedIndex);
+  if (documentedLines.length === 0) return null;
+  const firstDocumentedMatch = documentedLines[0].match(/^Documented:\s*(.*)$/i);
+  if (!firstDocumentedMatch) return null;
+  const documented = [firstDocumentedMatch[1], ...documentedLines.slice(1)].join(" ").trim();
+  if (!documented) return null;
+
+  const associatedLines = lines.slice(associatedIndex);
+  const firstAssociatedMatch = associatedLines[0].match(
+    /^Associated findings not yet documented this visit:\s*(.*)$/i,
+  );
+  if (!firstAssociatedMatch) return null;
+  const associatedFindingsNotDocumented = [firstAssociatedMatch[1], ...associatedLines.slice(1)]
+    .join(" ")
+    .trim();
+  if (!associatedFindingsNotDocumented) return null;
+
+  return {
+    segment: expectedSegment as "Anterior Segment" | "Posterior Segment",
+    documented,
+    associatedFindingsNotDocumented,
+  };
+}
+
+type ExamGuidanceValidation =
+  | { ok: true; sections: ExamGuidanceSection[] }
+  | { ok: false; reason: string; code: string };
+
+// Validates AND structurally extracts in one pass, same Option A approach as
+// validateDifferentialDiagnosis above — the returned sections are the exact
+// blocks that passed validation here, never re-parsed on the client.
+function validateExamGuidance(sanitised: string): ExamGuidanceValidation {
+  for (const pattern of EXAM_GUIDANCE_IMPERATIVE_PATTERNS) {
+    if (pattern.test(sanitised)) {
+      return {
+        ok: false,
+        reason: "Contains imperative/instructional language outside the permitted documentary framing",
+        code: "RESPONSE_UNSAFE",
+      };
+    }
+  }
+
+  const section = extractExamGuidanceSection(sanitised);
+
+  // Whole-response fallback: must be exactly this sentence, alone — a
+  // fragment alongside it must still fail closed, same rule as
+  // DIFFERENTIAL_NO_EVIDENCE_SENTENCE above.
+  if (section === EXAM_GUIDANCE_NO_DATA_SENTENCE) {
+    return { ok: true, sections: [] };
+  }
+
+  const rawBlocks = section.split(/\n\s*\n/).map((b) => b.trim()).filter(Boolean);
+  if (rawBlocks.length !== EXAM_GUIDANCE_SEGMENTS.length) {
+    return {
+      ok: false,
+      reason: `Response must contain exactly ${EXAM_GUIDANCE_SEGMENTS.length} segment blocks (Anterior Segment, Posterior Segment, in that order)`,
+      code: "EXAM_GUIDANCE_STRUCTURE_INVALID",
+    };
+  }
+
+  const sections: ExamGuidanceSection[] = [];
+  for (let i = 0; i < EXAM_GUIDANCE_SEGMENTS.length; i++) {
+    const parsed = parseExamGuidanceBlock(rawBlocks[i], EXAM_GUIDANCE_SEGMENTS[i]);
+    if (!parsed) {
+      return {
+        ok: false,
+        reason:
+          `Segment block ${i + 1} does not match the required "[${EXAM_GUIDANCE_SEGMENTS[i]}]" / ` +
+          "Documented / Associated findings format, in that order",
+        code: "EXAM_GUIDANCE_STRUCTURE_INVALID",
+      };
+    }
+    sections.push(parsed);
+  }
+
+  return { ok: true, sections };
+}
+
 export type ValidationResult =
-  | { ok: true; warnings: string[]; differentialDiagnosisItems?: DifferentialDiagnosisItem[] }
+  | {
+      ok: true;
+      warnings: string[];
+      differentialDiagnosisItems?: DifferentialDiagnosisItem[];
+      examGuidanceSections?: ExamGuidanceSection[];
+    }
   | { ok: false; reason: string; code: string };
 
 export function validateResponse(
@@ -429,6 +578,20 @@ export function validateResponse(
     differentialDiagnosisItems = result.items;
   }
 
+  // 4c. EXAM_GUIDANCE: two fixed segment blocks, documentary framing only.
+  // On-demand only — runs through the standalone /api/copilot/stream path,
+  // never the consolidated call. Also extracts the structured segment list
+  // alongside validation, threaded through NdjsonFrame's done.meta (see
+  // service/copilot.ts) and out via the PLUGIN_EXAM_GUIDANCE_RESULT
+  // postMessage — the exact same blocks that passed validation here, never
+  // re-parsed a second time on the client.
+  let examGuidanceSections: ExamGuidanceSection[] | undefined;
+  if (capability === "EXAM_GUIDANCE") {
+    const result = validateExamGuidance(sanitised);
+    if (!result.ok) return result;
+    examGuidanceSections = result.sections;
+  }
+
   // 5. Warning patterns (soft — response allowed through with annotations)
   const warnings = WARNING_PATTERNS.filter(({ pattern }) => pattern.test(sanitised)).map(
     ({ warning }) => warning,
@@ -438,5 +601,6 @@ export function validateResponse(
     ok: true,
     warnings,
     ...(differentialDiagnosisItems ? { differentialDiagnosisItems } : {}),
+    ...(examGuidanceSections ? { examGuidanceSections } : {}),
   };
 }

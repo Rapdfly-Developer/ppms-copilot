@@ -16,6 +16,18 @@ export type DifferentialDiagnosisItem = {
   source?: string;
 };
 
+// Structured view of one exam-guidance segment block — the same two blocks
+// validateExamGuidance() already parsed and approved, not a second independent
+// parse. EXAM_GUIDANCE is on-demand only (not part of CopilotData/the
+// consolidated call) — this travels through DoneMeta.examGuidanceSections on
+// the standalone /api/copilot/stream path instead, then out to PPMS Core via
+// the PLUGIN_EXAM_GUIDANCE_RESULT postMessage.
+export type ExamGuidanceSection = {
+  segment: "Anterior Segment" | "Posterior Segment";
+  documented: string;
+  associatedFindingsNotDocumented: string;
+};
+
 export type SectionOutcome =
   | { ok: true; text: string; warnings: string[]; differentialDiagnosisItems?: DifferentialDiagnosisItem[] }
   | { ok: false; errorCode: string; errorMessage: string };
@@ -53,6 +65,7 @@ export type Capability =
   | "INVESTIGATIONS_SUMMARY"
   | "ASSESSMENT_CONTEXT"
   | "SUGGESTED_QUESTIONS"
+  | "EXAM_GUIDANCE"
   | "QUESTION";
 
 // Token stored only in memory — never in localStorage or cookies.
@@ -77,6 +90,9 @@ export interface DoneMeta {
     estimatedTokens: number;
     [key: string]: unknown;
   };
+  // Populated only for the EXAM_GUIDANCE capability once validated — the same
+  // structured blocks validateExamGuidance() parsed server-side.
+  examGuidanceSections?: ExamGuidanceSection[];
 }
 
 // Must exactly mirror the server-side NdjsonFrame union in src/service/copilot.ts.

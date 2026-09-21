@@ -25,6 +25,16 @@ export const MSG_PLUGIN_TOKEN_EXPIRED = "PLUGIN_TOKEN_EXPIRED" as const;
 // differential-diagnosis card outside the plugin iframe, cached per visit.
 export const MSG_PLUGIN_DIFFERENTIAL_UPDATE = "PLUGIN_DIFFERENTIAL_UPDATE" as const;
 
+// EXAM_GUIDANCE is on-demand only — PPMS Core sends this INTO the iframe
+// (e.g. from a button on the General/Ophthalmic tabs) to request generation.
+export const MSG_PPMS_REQUEST_EXAM_GUIDANCE = "PPMS_REQUEST_EXAM_GUIDANCE" as const;
+
+// Sent once per PPMS_REQUEST_EXAM_GUIDANCE, whether the resulting on-demand
+// generation succeeded or failed — carries either the two structured segment
+// sections or an error, so PPMS Core can render/update its exam-guidance card
+// on the General and Ophthalmic tabs, outside this iframe.
+export const MSG_PLUGIN_EXAM_GUIDANCE_RESULT = "PLUGIN_EXAM_GUIDANCE_RESULT" as const;
+
 // API route paths (server-side only)
 export const COPILOT_STREAM_PATH = "/api/copilot/stream" as const;
 // Consolidated endpoint: one request → all six sections as structured JSON

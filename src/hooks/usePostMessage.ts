@@ -8,6 +8,10 @@
 //   - Silently ignores invalid messages — no error reveals to potential attackers.
 //   - Token is stored only in React state (memory), never in localStorage.
 //   - All outbound postMessages use targetOrigin = PPMS_ORIGIN (never "*").
+//   - PPMS_REQUEST_EXAM_GUIDANCE (the only other inbound message besides
+//     PPMS_INIT) additionally requires its visitId to match the session
+//     already established by PPMS_INIT — a stale/mismatched trigger is
+//     silently ignored rather than generating for the wrong visit.
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import {
@@ -18,14 +22,29 @@ import {
   MSG_PLUGIN_CLOSE,
   MSG_PLUGIN_TOKEN_EXPIRED,
   MSG_PLUGIN_DIFFERENTIAL_UPDATE,
+  MSG_PLUGIN_EXAM_GUIDANCE_RESULT,
 } from "@/lib/constants";
-import { validatePpmsInitMessage } from "@/lib/postmessage-validator";
-import type { CopilotSession, DifferentialDiagnosisItem } from "@/types/client";
-import type { PluginDraftConfirmedMessage, PluginDifferentialUpdateMessage } from "@/postmessage/types";
+import { validatePpmsInitMessage, validateRequestExamGuidanceMessage } from "@/lib/postmessage-validator";
+import type { CopilotSession, DifferentialDiagnosisItem, ExamGuidanceSection } from "@/types/client";
+import type {
+  PluginDraftConfirmedMessage,
+  PluginDifferentialUpdateMessage,
+  PluginExamGuidanceResultMessage,
+} from "@/postmessage/types";
 
 // Resolved at module load time — the value is embedded by Next.js at build time
 // for NEXT_PUBLIC_ variables. It is safe to read here.
 const PPMS_ORIGIN = process.env.NEXT_PUBLIC_PPMS_ORIGIN ?? "";
+
+// One PPMS_REQUEST_EXAM_GUIDANCE received. requestedAt (Date.now()) is a
+// change-detection key for the consuming effect — distinct from visitId
+// because the doctor could trigger the same visit's exam guidance more than
+// once (e.g. after documenting more of the General tab).
+export type ExamGuidanceRequest = { visitId: string; requestedAt: number };
+
+export type ExamGuidanceResult =
+  | { ok: true; sections: ExamGuidanceSection[] }
+  | { ok: false; errorCode: string; errorMessage: string };
 
 export interface UsePostMessageReturn {
   session: CopilotSession | null;
@@ -39,41 +58,68 @@ export interface UsePostMessageReturn {
   sendClose: () => void;
   clearSession: () => void;
   sendDifferentialUpdate: (visitId: string, items: DifferentialDiagnosisItem[]) => void;
+  examGuidanceRequest: ExamGuidanceRequest | null;
+  sendExamGuidanceResult: (visitId: string, result: ExamGuidanceResult) => void;
 }
 
 export function usePostMessage(): UsePostMessageReturn {
   const [session, setSession] = useState<CopilotSession | null>(null);
+  const [examGuidanceRequest, setExamGuidanceRequest] = useState<ExamGuidanceRequest | null>(null);
   // Track the source Window so replies go to the correct frame.
   const parentRef = useRef<MessageEventSource | null>(null);
+  // Mirrors `session` for use inside handleMessage, which is registered once
+  // (effect deps: []) and would otherwise close over a stale `session`.
+  const sessionRef = useRef<CopilotSession | null>(null);
+  useEffect(() => {
+    sessionRef.current = session;
+  }, [session]);
 
   useEffect(() => {
     let sessionReceived = false;
 
     function handleMessage(event: MessageEvent) {
-      const result = validatePpmsInitMessage(event.origin, event.data, PPMS_ORIGIN);
-      if (!result.ok) return; // Silently ignore — reveal nothing to potential attackers.
+      const initResult = validatePpmsInitMessage(event.origin, event.data, PPMS_ORIGIN);
+      if (initResult.ok) {
+        sessionReceived = true;
+        parentRef.current = event.source;
 
-      sessionReceived = true;
-      parentRef.current = event.source;
+        // Only create a new session (and trigger auto-start) when the visit changes.
+        // Repeated PPMS_INIT for the same visit (e.g. from the PLUGIN_MOUNTED retry
+        // loop) must not re-fire auto-start and burn another AI call.
+        setSession((prev) => {
+          if (
+            prev?.visitId === initResult.message.visitId &&
+            prev?.patientRef === initResult.message.patientRef
+          ) {
+            return prev;
+          }
+          return {
+            token: initResult.message.token,
+            visitId: initResult.message.visitId,
+            patientRef: initResult.message.patientRef,
+            initiatedAt: Date.now(),
+          };
+        });
 
-      // Only create a new session (and trigger auto-start) when the visit changes.
-      // Repeated PPMS_INIT for the same visit (e.g. from the PLUGIN_MOUNTED retry
-      // loop) must not re-fire auto-start and burn another AI call.
-      setSession((prev) => {
-        if (prev?.visitId === result.message.visitId && prev?.patientRef === result.message.patientRef) {
-          return prev;
-        }
-        return {
-          token: result.message.token,
-          visitId: result.message.visitId,
-          patientRef: result.message.patientRef,
-          initiatedAt: Date.now(),
-        };
-      });
+        // Acknowledge with PLUGIN_READY.
+        const readyMsg = { type: MSG_PLUGIN_READY, pluginId: PLUGIN_ID };
+        postToParent(readyMsg, event.source);
+        return;
+      }
 
-      // Acknowledge with PLUGIN_READY.
-      const readyMsg = { type: MSG_PLUGIN_READY, pluginId: PLUGIN_ID };
-      postToParent(readyMsg, event.source);
+      // Not a PPMS_INIT — try the on-demand EXAM_GUIDANCE trigger. Requires
+      // visitId to match the session already established by PPMS_INIT (see
+      // validateRequestExamGuidanceMessage) — silently ignored otherwise,
+      // same fail-closed posture as an invalid PPMS_INIT.
+      const examResult = validateRequestExamGuidanceMessage(
+        event.origin,
+        event.data,
+        PPMS_ORIGIN,
+        sessionRef.current?.visitId ?? null,
+      );
+      if (examResult.ok) {
+        setExamGuidanceRequest({ visitId: examResult.message.visitId, requestedAt: Date.now() });
+      }
     }
 
     window.addEventListener("message", handleMessage);
@@ -160,6 +206,23 @@ export function usePostMessage(): UsePostMessageReturn {
     [],
   );
 
+  // Token is NOT included — same posture as sendDifferentialUpdate. Sent once
+  // per PPMS_REQUEST_EXAM_GUIDANCE, whether the on-demand generation it
+  // triggered succeeded or failed.
+  const sendExamGuidanceResult = useCallback((visitId: string, result: ExamGuidanceResult) => {
+    const msg: PluginExamGuidanceResultMessage = result.ok
+      ? { type: MSG_PLUGIN_EXAM_GUIDANCE_RESULT, pluginId: PLUGIN_ID, visitId, ok: true, sections: result.sections }
+      : {
+          type: MSG_PLUGIN_EXAM_GUIDANCE_RESULT,
+          pluginId: PLUGIN_ID,
+          visitId,
+          ok: false,
+          errorCode: result.errorCode,
+          errorMessage: result.errorMessage,
+        };
+    postToParent(msg);
+  }, []);
+
   return {
     session,
     confirmDraft,
@@ -168,5 +231,7 @@ export function usePostMessage(): UsePostMessageReturn {
     sendClose,
     clearSession,
     sendDifferentialUpdate,
+    examGuidanceRequest,
+    sendExamGuidanceResult,
   };
 }

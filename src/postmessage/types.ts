@@ -10,13 +10,15 @@
 import {
   PLUGIN_ID,
   MSG_PPMS_INIT,
+  MSG_PPMS_REQUEST_EXAM_GUIDANCE,
   MSG_PLUGIN_READY,
   MSG_PLUGIN_DRAFT_CONFIRMED,
   MSG_PLUGIN_ERROR,
   MSG_PLUGIN_CLOSE,
   MSG_PLUGIN_DIFFERENTIAL_UPDATE,
+  MSG_PLUGIN_EXAM_GUIDANCE_RESULT,
 } from "@/lib/constants";
-import type { DifferentialDiagnosisItem } from "@/types/client";
+import type { DifferentialDiagnosisItem, ExamGuidanceSection } from "@/types/client";
 
 // ── Inbound: messages PPMS Core sends TO the Copilot ─────────────────────────
 
@@ -30,7 +32,18 @@ export type PpmsInitMessage = {
   ppmsVersion: string;
 };
 
-export type InboundPluginMessage = PpmsInitMessage;
+// Sent by PPMS Core (e.g. a button on the General/Ophthalmic tabs) to request
+// an on-demand EXAM_GUIDANCE generation. No token — the plugin already holds
+// one in memory from PPMS_INIT for the current session; this message only
+// needs to identify which visit the request is for, so the handler can
+// confirm it matches the session already established.
+export type PpmsRequestExamGuidanceMessage = {
+  type: typeof MSG_PPMS_REQUEST_EXAM_GUIDANCE;
+  pluginId: string;
+  visitId: string;
+};
+
+export type InboundPluginMessage = PpmsInitMessage | PpmsRequestExamGuidanceMessage;
 
 // ── Outbound: messages the Copilot sends TO PPMS Core ────────────────────────
 
@@ -75,9 +88,32 @@ export type PluginDifferentialUpdateMessage = {
   items: DifferentialDiagnosisItem[]; // [] means "considered — nothing to show" (e.g. insufficient evidence)
 };
 
+// Sent once per PPMS_REQUEST_EXAM_GUIDANCE, whether the on-demand generation
+// it triggered succeeded or failed. Same no-token, no-PHI-beyond-what's-
+// already-sent posture as PluginDifferentialUpdateMessage: `sections` carries
+// only the two segment blocks the doctor already sees rendered in the
+// Copilot's own output.
+export type PluginExamGuidanceResultMessage =
+  | {
+      type: typeof MSG_PLUGIN_EXAM_GUIDANCE_RESULT;
+      pluginId: typeof PLUGIN_ID;
+      visitId: string;
+      ok: true;
+      sections: ExamGuidanceSection[]; // [] means "considered — nothing to correlate" (e.g. insufficient data)
+    }
+  | {
+      type: typeof MSG_PLUGIN_EXAM_GUIDANCE_RESULT;
+      pluginId: typeof PLUGIN_ID;
+      visitId: string;
+      ok: false;
+      errorCode: string;
+      errorMessage: string;
+    };
+
 export type OutboundPluginMessage =
   | PluginReadyMessage
   | PluginDraftConfirmedMessage
   | PluginErrorMessage
   | PluginCloseMessage
-  | PluginDifferentialUpdateMessage;
+  | PluginDifferentialUpdateMessage
+  | PluginExamGuidanceResultMessage;

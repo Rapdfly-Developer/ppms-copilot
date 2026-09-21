@@ -123,6 +123,30 @@ describe("Clinical context builder", () => {
       const occurrences = (ctx.text.match(/visit-current-001/g) ?? []).length;
       expect(occurrences).toBe(0); // visitId is not rendered in text
     });
+
+    it("includes reportedMedications in the rendered visit text", async () => {
+      // reportedMedications is fetched on VisitDTO but was never wired into
+      // renderVisit() — a real gap (confirmed by grep against ppms-client.ts)
+      // fixed alongside the EXAM_GUIDANCE capability that needs it.
+      const visitWithReportedMedications = {
+        ...FIXTURE_VISIT_CURRENT,
+        reportedMedications: "Patient reports taking over-the-counter artificial tears twice daily",
+      };
+      vi.spyOn(ppmsClient, "getPatient").mockResolvedValue(FIXTURE_PATIENT);
+      vi.spyOn(ppmsClient, "getVisit").mockResolvedValue(visitWithReportedMedications);
+      vi.spyOn(ppmsClient, "getVisits").mockResolvedValue([]);
+      vi.spyOn(ppmsClient, "getAppointments").mockResolvedValue([]);
+      vi.spyOn(ppmsClient, "getTimeline").mockResolvedValue([]);
+
+      const ctx = await buildPatientContext({
+        token: FIXTURE_TOKEN,
+        capability: "PATIENT_SNAPSHOT",
+        patientRef: FIXTURE_PATIENT.udid,
+        visitId: FIXTURE_VISIT_CURRENT.visitId,
+      });
+
+      expect(ctx.text).toContain("Reported medications: Patient reports taking over-the-counter artificial tears twice daily");
+    });
   });
 
   describe("Context stats", () => {

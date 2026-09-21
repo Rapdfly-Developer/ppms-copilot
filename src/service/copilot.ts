@@ -200,6 +200,13 @@ export async function* streamCopilotResponse(
       draftType: capConfig.draftType,
       contextStats: context.stats,
       latencyMs,
+      // Only set for EXAM_GUIDANCE (validateResponse only populates this
+      // field for that capability) — the exact blocks that passed validation
+      // above, never re-parsed on the client. Carried by CopilotApp.tsx into
+      // the PLUGIN_EXAM_GUIDANCE_RESULT postMessage.
+      ...(validation.examGuidanceSections
+        ? { examGuidanceSections: validation.examGuidanceSections }
+        : {}),
     },
   };
 }

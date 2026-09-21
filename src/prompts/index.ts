@@ -115,6 +115,45 @@ Rules for this list:
 
 State only what the record documents, or clearly label general clinical reasoning as such when a consideration isn't tied to a specific finding. Do not fabricate documented details that are not present.`;
 
+// ── Exam Guidance instructions ────────────────────────────────────────────────
+// EXAM_GUIDANCE is on-demand only — triggered from PPMS Core (a button on the
+// General/Ophthalmic tabs) via PPMS_REQUEST_EXAM_GUIDANCE, answered through
+// the standalone /api/copilot/stream path (CAPABILITY_INSTRUCTIONS.EXAM_GUIDANCE
+// below), never bundled into the eager consolidated call — the General tab is
+// often empty at visit-open, so eagerly generating this alongside the other
+// 11 sections would frequently produce nothing useful.
+
+const EXAM_GUIDANCE_INSTRUCTIONS = `Task: Correlate what is already documented for this visit (chief complaint, history of presenting illness, past medical history, allergies, vitals, and patient-reported medications) with associated ophthalmic exam findings the treating doctor may wish to note, organised by anatomical segment. This is a documentary correlation for the doctor's own reference — NOT an instruction to perform any examination, test, or action.
+
+DATA LIMITATION — you do not have access to:
+- Examination findings, investigation results, or diagnoses from this visit
+Base your correlations only on the documented chief complaint, HPI, past medical history, allergies, vitals, and reported medications. Do not imply access to findings you do not have.
+
+Structure your response as EXACTLY two blocks, in this exact order, with a blank line between them and no blank line within a block:
+
+[Anterior Segment]
+Documented: [What is documented above that is clinically relevant to the anterior segment. If nothing relevant is documented, write exactly: "No documented findings relevant to this segment."]
+Associated findings not yet documented this visit: [Findings clinically associated with what is documented above that have not yet been recorded for this visit, phrased descriptively — never as an instruction. If the Documented line above has nothing to associate from, write exactly: "None — insufficient documented findings to associate."]
+
+[Posterior Segment]
+Documented: [same instructions as above, for the posterior segment]
+Associated findings not yet documented this visit: [same instructions as above, for the posterior segment]
+
+For example, given a record documenting photophobia and eye pain at V0:
+
+[Anterior Segment]
+Documented: Photophobia and eye pain reported at V0 2024-06-15.
+Associated findings not yet documented this visit: Anterior chamber reaction or ciliary flush, given the documented photophobia and eye pain.
+
+[Posterior Segment]
+Documented: No documented findings relevant to this segment.
+Associated findings not yet documented this visit: None — insufficient documented findings to associate.
+
+Rules for this response:
+- Never phrase either line as an instruction or action. Do not begin either line with, or otherwise use, words like "Check," "Examine," "Look for," "Assess," "Rule out," "Perform," "Test for," "Evaluate," "Order," "Screen for," or "Investigate." Always phrase as a documentary description of an associated finding (e.g. "Anterior chamber reaction, given documented photophobia and eye pain" — never "Check for anterior chamber reaction").
+- Only if the documented chief complaint, HPI, past medical history, allergies, vitals, and reported medications are ALL absent or contain nothing clinically relevant to correlate from either segment, write this exact sentence and nothing else in this section: "The documented record does not contain sufficient findings to correlate exam guidance at this time."
+- Do not fabricate documented details that are not present. State only documentary correlations — never recommend, instruct, or imply any clinical action.`;
+
 // ── Capability-specific instructions ─────────────────────────────────────────
 
 const CAPABILITY_INSTRUCTIONS: Record<Capability, string> = {
@@ -399,6 +438,8 @@ Rules:
 - Maximum 5 items.
 - If the record appears complete for the documented visit scope, state exactly: "No significant documentation gaps identified."`,
 
+  EXAM_GUIDANCE: EXAM_GUIDANCE_INSTRUCTIONS,
+
   QUESTION: `Task: Answer the doctor's question based strictly on the documented patient record.
 
 Rules:
@@ -451,7 +492,10 @@ export function buildUserMessage(
 // ── Consolidated prompt (one call → all 11 sections) ─────────────────────────
 // One AI call generates all 11 sections. DIFFERENTIAL_DIAGNOSIS instructions
 // are the same constant used by the standalone CAPABILITY_INSTRUCTIONS path so
-// the two paths can never silently drift apart.
+// the two paths can never silently drift apart. EXAM_GUIDANCE is deliberately
+// NOT part of this consolidated bundle — it's on-demand only (see
+// CAPABILITY_INSTRUCTIONS.EXAM_GUIDANCE below, used solely by the standalone
+// /api/copilot/stream path).
 
 const CONSOLIDATED_SECTION_INSTRUCTIONS = `OUTPUT FORMAT REQUIREMENT:
 Return a single JSON object with EXACTLY these 11 keys. Each value is a clinical text string in markdown-lite format (## Heading, **Label:** value, - bullet). Return ONLY the JSON object — no preamble, no commentary, no code fence.

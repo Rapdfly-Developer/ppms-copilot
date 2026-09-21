@@ -1,11 +1,14 @@
 // Consolidated Copilot generation service.
 //
-// Replaces 7 independent per-capability requests with a single AI call that
-// generates all seven sections (snapshot, previousVisits, timeline, attention,
-// draftNote, followUp, differentialDiagnosis) as a structured JSON response.
-// differentialDiagnosis used to run as its own on-demand /api/copilot/stream
-// call, triggered only when the doctor opened that tab — it's now bundled in
-// here like the other 6, so opening a visit costs exactly one AI call.
+// Replaces independent per-capability requests with a single AI call that
+// generates all eleven sections (snapshot, previousVisits, timeline,
+// attention, draftNote, followUp, differentialDiagnosis, medications,
+// investigations, assessmentContext, suggestedQuestions) as a structured JSON
+// response — so opening a visit costs exactly one AI call. EXAM_GUIDANCE is
+// NOT part of this bundle — it's on-demand only, triggered from PPMS Core via
+// its own /api/copilot/stream request (see CopilotApp.tsx's second
+// useCopilotStream instance), since the General tab it correlates from is
+// often empty at visit-open.
 //
 // Security invariants:
 //   - patientRef and visitId come from the decoded token ONLY — never from body.
@@ -117,7 +120,7 @@ export async function generateCopilot(
   }
   const { token, patientRef, visitId } = routing;
 
-  // 2. Fetch all context once (union of all 6 capabilities' data needs)
+  // 2. Fetch all context once (union of all consolidated capabilities' data needs)
   let context: Awaited<ReturnType<typeof buildConsolidatedContext>>;
   try {
     context = await buildConsolidatedContext({ token, patientRef, visitId });

@@ -15,6 +15,7 @@ export const CAPABILITIES = {
   INVESTIGATIONS_SUMMARY: "INVESTIGATIONS_SUMMARY",
   ASSESSMENT_CONTEXT: "ASSESSMENT_CONTEXT",
   SUGGESTED_QUESTIONS: "SUGGESTED_QUESTIONS",
+  EXAM_GUIDANCE: "EXAM_GUIDANCE",
   QUESTION: "QUESTION",
 } as const;
 
@@ -182,6 +183,21 @@ export const CAPABILITY_CONFIG: Record<Capability, CapabilityConfig> = {
     producesDraft: false,
     reasoningEffort: "medium",
     modelTier: "fast",
+  },
+  EXAM_GUIDANCE: {
+    label: "Exam Guidance",
+    description:
+      "Correlates documented general-visit findings with associated exam findings not yet documented, by anatomical segment",
+    // Every documented field this capability correlates from (chief complaint,
+    // HPI, past medical history, allergies, vitals, reported medications) lives
+    // on the current visit only — no visit history needed.
+    includes: { demographics: true, currentVisit: true, visitHistory: false, appointments: false, timeline: false },
+    visitLimit: 1,
+    maxTokens: 900,
+    permission: "ai.copilot.draft",
+    producesDraft: false,
+    reasoningEffort: "high",
+    modelTier: "reasoning",
   },
   QUESTION: {
     label: "Ask a Question",

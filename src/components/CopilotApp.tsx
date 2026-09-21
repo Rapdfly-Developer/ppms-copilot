@@ -23,10 +23,17 @@
 //     validates successfully (see lib/differential-update.ts) — visitId + the
 //     diagnosis list only, no token, so PPMS Core can render a persistent
 //     differential-diagnosis card outside this iframe.
+//   - EXAM_GUIDANCE is a SEPARATE, on-demand-only request — not part of the
+//     consolidated call. PPMS Core triggers it via PPMS_REQUEST_EXAM_GUIDANCE
+//     (e.g. a button on the General/Ophthalmic tabs); this component runs it
+//     through its own useCopilotStream instance and reports the result back
+//     via PLUGIN_EXAM_GUIDANCE_RESULT — visitId + the segment list only, no
+//     token, same posture as PLUGIN_DIFFERENTIAL_UPDATE.
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { usePostMessage } from "@/hooks/usePostMessage";
 import { useCopilotGenerate } from "@/hooks/useCopilotGenerate";
+import { useCopilotStream } from "@/hooks/useCopilotStream";
 import { CapabilitySelector } from "@/components/CapabilitySelector";
 import { ResponseArea } from "@/components/ResponseArea";
 import { ActionBar } from "@/components/ActionBar";
@@ -318,14 +325,27 @@ function Disclaimer() {
 // ── CopilotApp ────────────────────────────────────────────────────────────────
 
 export default function CopilotApp() {
-  const { session, confirmDraft, requestTokenRefresh, sendDifferentialUpdate } = usePostMessage();
+  const {
+    session,
+    confirmDraft,
+    requestTokenRefresh,
+    sendDifferentialUpdate,
+    examGuidanceRequest,
+    sendExamGuidanceResult,
+  } = usePostMessage();
   const { state, generate, regenerate, cancel } = useCopilotGenerate();
+  const examGuidanceStream = useCopilotStream();
   const [activeCapability, setActiveCapability] = useState<Capability>("PATIENT_SNAPSHOT");
   const [draftText, setDraftText] = useState("");
   const [draftConfirmed, setDraftConfirmed] = useState(false);
 
   const sessionStartedRef = useRef<number | null>(null);
   const differentialSentForRef = useRef<string | null>(null);
+  // Strict-Mode-safe guards, same pattern as sessionStartedRef/differentialSentForRef —
+  // keyed on examGuidanceRequest.requestedAt so a double-invoked effect (dev
+  // Strict Mode) doesn't fire a second AI call or send a duplicate result.
+  const examGuidanceTriggeredForRef = useRef<number | null>(null);
+  const examGuidanceResultSentForRef = useRef<number | null>(null);
 
   // Trigger ONE consolidated generation when a new session arrives.
   // The ref guard prevents double-firing from React Strict Mode re-execution.
@@ -365,6 +385,41 @@ export default function CopilotApp() {
     differentialSentForRef.current = decision.requestId;
     sendDifferentialUpdate(session.visitId, decision.items);
   }, [state, session, sendDifferentialUpdate]);
+
+  // Trigger an on-demand EXAM_GUIDANCE generation when PPMS Core asks for one.
+  // Separate request/hook from the consolidated flow above — no cacheKey, so
+  // every trigger regenerates fresh (the General tab's documentation can
+  // change between triggers within the same visit).
+  useEffect(() => {
+    if (!examGuidanceRequest || !session) return;
+    if (examGuidanceTriggeredForRef.current === examGuidanceRequest.requestedAt) return;
+    examGuidanceTriggeredForRef.current = examGuidanceRequest.requestedAt;
+    examGuidanceStream.start("EXAM_GUIDANCE", session.token);
+  }, [examGuidanceRequest, session, examGuidanceStream]);
+
+  // Report the on-demand result back to PPMS Core once it settles, whether it
+  // succeeded or failed — never left silent, since PPMS Core's button/card is
+  // waiting on a reply for this specific request.
+  useEffect(() => {
+    if (!examGuidanceRequest || !session) return;
+    if (examGuidanceResultSentForRef.current === examGuidanceRequest.requestedAt) return;
+    const streamState = examGuidanceStream.state;
+
+    if (streamState.status === "done") {
+      examGuidanceResultSentForRef.current = examGuidanceRequest.requestedAt;
+      sendExamGuidanceResult(session.visitId, {
+        ok: true,
+        sections: streamState.doneMeta?.examGuidanceSections ?? [],
+      });
+    } else if (streamState.status === "error") {
+      examGuidanceResultSentForRef.current = examGuidanceRequest.requestedAt;
+      sendExamGuidanceResult(session.visitId, {
+        ok: false,
+        errorCode: streamState.errorCode ?? "INTERNAL_ERROR",
+        errorMessage: streamState.errorMessage ?? "An unexpected error occurred. Please try again.",
+      });
+    }
+  }, [examGuidanceRequest, session, examGuidanceStream.state, sendExamGuidanceResult]);
 
   // Periodic re-render to detect expiry.
   const [, setTick] = useState(0);
