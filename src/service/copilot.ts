@@ -43,7 +43,7 @@ export async function* streamCopilotResponse(
   // 1. Parse & validate
   const parsed = parseRequest(body, authorizationHeader);
   if (!parsed.ok) {
-    yield errorFrame(parsed.code, parsed.code as ErrorCode);
+    yield errorFrame(parsed.code);
     return;
   }
 
@@ -64,7 +64,7 @@ export async function* streamCopilotResponse(
     const code =
       err instanceof CopilotError ? err.code : ("INTERNAL_ERROR" as ErrorCode);
     logger.error("pipeline_context_failed", { requestId, capability, code });
-    yield errorFrame(code, code);
+    yield errorFrame(code);
     return;
   }
 
@@ -76,7 +76,7 @@ export async function* streamCopilotResponse(
   const provider = createProvider();
   if (!provider.isConfigured()) {
     logger.error("pipeline_provider_not_configured", { requestId, capability });
-    yield errorFrame("AI_NOT_CONFIGURED", "AI_NOT_CONFIGURED");
+    yield errorFrame("AI_NOT_CONFIGURED");
     return;
   }
 
@@ -119,18 +119,18 @@ export async function* streamCopilotResponse(
         };
       } else if (event.type === "error") {
         logger.error("pipeline_stream_error", { requestId, capability, code: event.code });
-        yield errorFrame(event.code, event.code as ErrorCode);
+        yield errorFrame(event.code);
         return;
       }
     }
   } catch {
     logger.error("pipeline_stream_exception", { requestId, capability });
-    yield errorFrame("AI_UNAVAILABLE", "AI_UNAVAILABLE");
+    yield errorFrame("AI_UNAVAILABLE");
     return;
   }
 
   if (!streamDone) {
-    yield errorFrame("INTERNAL_ERROR", "INTERNAL_ERROR");
+    yield errorFrame("INTERNAL_ERROR");
     return;
   }
 
@@ -157,7 +157,7 @@ export async function* streamCopilotResponse(
       safetyResult,
       latencyMs,
     });
-    yield errorFrame(validation.code, "RESPONSE_VALIDATION_FAILED");
+    yield errorFrame(validation.code);
     return;
   }
 
@@ -213,8 +213,18 @@ export async function* streamCopilotResponse(
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function errorFrame(rawCode: string, mappedCode: ErrorCode): NdjsonFrame {
+// Looks up the message for the code's OWN entry in USER_MESSAGES — never a
+// caller-forced substitute. Previously the validation-failure call site
+// forced every rejection (RESPONSE_EMPTY, RESPONSE_TRUNCATED, RESPONSE_UNSAFE,
+// any *_STRUCTURE_INVALID code) through the generic RESPONSE_VALIDATION_FAILED
+// wording ("AI response did not meet clinical safety requirements"), so a
+// boring token-budget truncation looked identical to a genuine safety
+// rejection to the doctor. `code` may be any string (e.g. validation.code is
+// typed as `string`, not ErrorCode) — the `as ErrorCode` cast is safe here
+// only because the lookup falls back to a generic message for anything
+// unrecognized, same fallback as before.
+function errorFrame(code: string): NdjsonFrame {
   const message =
-    USER_MESSAGES[mappedCode] ?? USER_MESSAGES.INTERNAL_ERROR;
-  return { type: "error", code: rawCode, message, discard: true };
+    USER_MESSAGES[code as ErrorCode] ?? USER_MESSAGES.INTERNAL_ERROR;
+  return { type: "error", code, message, discard: true };
 }

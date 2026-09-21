@@ -193,7 +193,14 @@ export const CAPABILITY_CONFIG: Record<Capability, CapabilityConfig> = {
     // on the current visit only — no visit history needed.
     includes: { demographics: true, currentVisit: true, visitHistory: false, appointments: false, timeline: false },
     visitLimit: 1,
-    maxTokens: 900,
+    // 1400: was 900, which live-testing against the real Groq API showed was
+    // too tight for openai/gpt-oss-120b — 3 of 8 real calls hit max_tokens
+    // (1 empty response, 2 truncated mid-sentence), all misreported to the
+    // doctor as a generic "clinical safety" failure (see errorFrame below —
+    // now fixed to surface the real per-code message). Matched to
+    // DIFFERENTIAL_DIAGNOSIS's budget, which does comparably open-ended
+    // reasoning over a similar amount of documented input.
+    maxTokens: 1400,
     permission: "ai.copilot.draft",
     producesDraft: false,
     reasoningEffort: "high",
