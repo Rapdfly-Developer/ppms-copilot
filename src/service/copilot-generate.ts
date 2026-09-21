@@ -264,7 +264,14 @@ export async function generateCopilot(
       // Some models double-escape newlines inside json_object responses, emitting
       // literal \n (two chars) instead of a real newline. Normalise before storing.
       const normalised = raw.replace(/\\n/g, "\n").replace(/\\t/g, "\t");
-      sections[key] = { ok: true, text: normalised, warnings: validation.warnings };
+      sections[key] = {
+        ok: true,
+        text: normalised,
+        warnings: validation.warnings,
+        ...(validation.differentialDiagnosisItems
+          ? { differentialDiagnosisItems: validation.differentialDiagnosisItems }
+          : {}),
+      };
       sectionResults[key] = validation.warnings.length > 0 ? "ok_with_warnings" : "ok";
     }
   }

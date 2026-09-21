@@ -14,7 +14,9 @@ import {
   MSG_PLUGIN_DRAFT_CONFIRMED,
   MSG_PLUGIN_ERROR,
   MSG_PLUGIN_CLOSE,
+  MSG_PLUGIN_DIFFERENTIAL_UPDATE,
 } from "@/lib/constants";
+import type { DifferentialDiagnosisItem } from "@/types/client";
 
 // ── Inbound: messages PPMS Core sends TO the Copilot ─────────────────────────
 
@@ -60,8 +62,22 @@ export type PluginCloseMessage = {
   pluginId: typeof PLUGIN_ID;
 };
 
+// Sent once per successful consolidated generation (and again after
+// Regenerate) once differentialDiagnosis validates successfully — never on a
+// validation failure. IMPORTANT: no patientRef, no token — visitId only,
+// same security posture as PluginDraftConfirmedMessage. `items` carries only
+// what the doctor already sees rendered in the Copilot's own Differential Dx
+// tab: no PHI beyond what's already been sent via other plugin messages.
+export type PluginDifferentialUpdateMessage = {
+  type: typeof MSG_PLUGIN_DIFFERENTIAL_UPDATE;
+  pluginId: typeof PLUGIN_ID;
+  visitId: string;
+  items: DifferentialDiagnosisItem[]; // [] means "considered — nothing to show" (e.g. insufficient evidence)
+};
+
 export type OutboundPluginMessage =
   | PluginReadyMessage
   | PluginDraftConfirmedMessage
   | PluginErrorMessage
-  | PluginCloseMessage;
+  | PluginCloseMessage
+  | PluginDifferentialUpdateMessage;

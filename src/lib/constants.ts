@@ -19,6 +19,12 @@ export const MAX_TOKEN_LIFETIME_MS = MAX_TOKEN_LIFETIME_SECONDS * 1000;
 // PPMS Core should respond with a fresh PPMS_INIT message.
 export const MSG_PLUGIN_TOKEN_EXPIRED = "PLUGIN_TOKEN_EXPIRED" as const;
 
+// Sent once per successful consolidated generation (and again after
+// Regenerate) once differentialDiagnosis validates successfully. Carries the
+// structured consideration list so PPMS Core can render a persistent
+// differential-diagnosis card outside the plugin iframe, cached per visit.
+export const MSG_PLUGIN_DIFFERENTIAL_UPDATE = "PLUGIN_DIFFERENTIAL_UPDATE" as const;
+
 // API route paths (server-side only)
 export const COPILOT_STREAM_PATH = "/api/copilot/stream" as const;
 // Consolidated endpoint: one request → all six sections as structured JSON

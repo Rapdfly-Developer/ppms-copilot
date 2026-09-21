@@ -19,6 +19,10 @@
 //   - Token lives only in React state (memory), never persisted.
 //   - Regenerate issues one new consolidated request covering all 7 sections.
 //   - Draft text is editable before confirmation — never auto-saved.
+//   - PLUGIN_DIFFERENTIAL_UPDATE is sent automatically once differentialDiagnosis
+//     validates successfully (see lib/differential-update.ts) — visitId + the
+//     diagnosis list only, no token, so PPMS Core can render a persistent
+//     differential-diagnosis card outside this iframe.
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { usePostMessage } from "@/hooks/usePostMessage";
@@ -28,6 +32,7 @@ import { ResponseArea } from "@/components/ResponseArea";
 import { ActionBar } from "@/components/ActionBar";
 import { CAPABILITY_CONFIG } from "@/capabilities";
 import { MAX_TOKEN_LIFETIME_MS } from "@/lib/constants";
+import { decideDifferentialUpdate } from "@/lib/differential-update";
 import type { Capability, StreamState, CopilotGenerateState, SectionOutcome } from "@/types/client";
 
 // ── Capability → section key mapping ─────────────────────────────────────────
@@ -313,13 +318,14 @@ function Disclaimer() {
 // ── CopilotApp ────────────────────────────────────────────────────────────────
 
 export default function CopilotApp() {
-  const { session, confirmDraft, requestTokenRefresh } = usePostMessage();
+  const { session, confirmDraft, requestTokenRefresh, sendDifferentialUpdate } = usePostMessage();
   const { state, generate, regenerate, cancel } = useCopilotGenerate();
   const [activeCapability, setActiveCapability] = useState<Capability>("PATIENT_SNAPSHOT");
   const [draftText, setDraftText] = useState("");
   const [draftConfirmed, setDraftConfirmed] = useState(false);
 
   const sessionStartedRef = useRef<number | null>(null);
+  const differentialSentForRef = useRef<string | null>(null);
 
   // Trigger ONE consolidated generation when a new session arrives.
   // The ref guard prevents double-firing from React Strict Mode re-execution.
@@ -347,6 +353,18 @@ export default function CopilotApp() {
       setDraftText(section.text);
     }
   }, [state.status, activeCapability]);
+
+  // Notify PPMS Core once per successful generation (fresh fetch or
+  // Regenerate — never a failed section, never a re-render or tab switch)
+  // so it can render a persistent differential-diagnosis card outside this
+  // iframe. Decision logic is a pure function (lib/differential-update.ts)
+  // so "fires exactly once per generation" is unit-testable without a DOM.
+  useEffect(() => {
+    const decision = decideDifferentialUpdate(state, differentialSentForRef.current);
+    if (!decision.send || !session) return;
+    differentialSentForRef.current = decision.requestId;
+    sendDifferentialUpdate(session.visitId, decision.items);
+  }, [state, session, sendDifferentialUpdate]);
 
   // Periodic re-render to detect expiry.
   const [, setTick] = useState(0);

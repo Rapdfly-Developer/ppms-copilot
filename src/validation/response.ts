@@ -16,6 +16,7 @@
 // the first). Both layers must always be present and neither can be bypassed.
 
 import type { Capability } from "@/capabilities";
+import type { DifferentialDiagnosisItem } from "@/types/client";
 
 // ── Pre-sanitiser ─────────────────────────────────────────────────────────────
 // Rewrites benign documentary phrases that incidentally match a forbidden
@@ -156,7 +157,10 @@ const SOAP_SECTIONS = ["Subjective:", "Objective:", "Assessment:", "Plan:"];
 
 // Confidence vocabulary is deliberately limited to two non-committal labels.
 // "high" is never permitted — there is no cited-evidence tier that reaches it.
-const DIFFERENTIAL_CONFIDENCE_LABELS = ["low", "moderate"];
+// Title-cased to match DifferentialDiagnosisItem.confidence's exact literal
+// union ("Low" | "Moderate") — the value sent to PPMS Core, not just the
+// value used for internal validation.
+const DIFFERENTIAL_CONFIDENCE_LABELS = ["Low", "Moderate"];
 
 const DIFFERENTIAL_NO_EVIDENCE_SENTENCE =
   "The documented record does not contain sufficient findings to support any diagnostic considerations at this time.";
@@ -214,7 +218,7 @@ function extractConsiderationsSection(text: string): string {
 // replacement for the old loose-candidate cross-check: because every block is
 // parsed field-by-field, there is no "well-formed subset" for a malformed
 // block to hide behind.
-function parseConsiderationBlock(block: string): { name: string; confidence: string } | null {
+function parseConsiderationBlock(block: string): DifferentialDiagnosisItem | null {
   const lines = block.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
   if (lines.length < 3) return null;
 
@@ -240,7 +244,17 @@ function parseConsiderationBlock(block: string): { name: string; confidence: str
   // is genuinely malformed, not a natural wrap — still reject it.
   if (reasonLines.some((l) => /^Confidence:/i.test(l) || /^Source:/i.test(l))) return null;
 
+  // The regex alternation only ever matches "Low" or "Moderate" (case-
+  // insensitively) at this position — confidenceIndex was itself found by
+  // testing the same pattern, so nothing else could have landed here. The
+  // ternary below is therefore exhaustive: confidenceMatch[1].toLowerCase()
+  // has exactly two possible values, both handled explicitly. This is what
+  // guarantees DifferentialDiagnosisItem.confidence is genuinely always
+  // "Low" | "Moderate" for every item this function ever returns — not an
+  // assumption enforced elsewhere, but a structural property of this regex.
   const confidenceMatch = lines[confidenceIndex].match(/^Confidence:\s*(Low|Moderate)\s*$/i)!;
+  const confidence: "Low" | "Moderate" =
+    confidenceMatch[1].toLowerCase() === "low" ? "Low" : "Moderate";
 
   // At most one line may follow Confidence (the optional Source line). More
   // than one means either a second, unseparated block ran on directly after
@@ -248,18 +262,26 @@ function parseConsiderationBlock(block: string): { name: string; confidence: str
   // the old length bound rejected them.
   const trailing = lines.slice(confidenceIndex + 1);
   if (trailing.length > 1) return null;
+  let source: string | undefined;
   if (trailing.length === 1) {
     const sourceMatch = trailing[0].match(/^Source:\s*(.+)$/i);
     if (!sourceMatch || !sourceMatch[1].trim()) return null;
+    source = sourceMatch[1].trim();
   }
 
-  return { name: nameMatch[1].trim(), confidence: confidenceMatch[1].toLowerCase() };
+  return { name: nameMatch[1].trim(), confidence, ...(source ? { source } : {}) };
 }
 
-function validateDifferentialDiagnosis(sanitised: string): ValidationResult | null {
-  // Returns null when structurally valid (caller proceeds to the shared warning
-  // pass); returns a failing ValidationResult otherwise.
+type DifferentialValidation =
+  | { ok: true; items: DifferentialDiagnosisItem[] }
+  | { ok: false; reason: string; code: string };
 
+// Validates AND structurally extracts in one pass — the returned items are
+// the exact same blocks that passed validation, never a second independent
+// parse. Consumed by validateResponse() below to (a) accept/reject the
+// section and (b) carry items through to ValidationResult.differentialDiagnosisItems
+// for PPMS Core's persistent differential-diagnosis card.
+function validateDifferentialDiagnosis(sanitised: string): DifferentialValidation {
   // Certainty language is a hard reject regardless of list structure — the
   // vocabulary is locked to "low"/"moderate" and nothing may imply more.
   for (const pattern of DIFFERENTIAL_CERTAINTY_PATTERNS) {
@@ -288,7 +310,7 @@ function validateDifferentialDiagnosis(sanitised: string): ValidationResult | nu
   // second block (even a malformed fragment) alongside the sentence must
   // still fail closed rather than being masked by the valid refusal.
   if (rawBlocks.length === 1 && rawBlocks[0] === DIFFERENTIAL_NO_EVIDENCE_SENTENCE) {
-    return null;
+    return { ok: true, items: [] };
   }
 
   // Merge orphaned tail fragments caused by blank lines within a block.
@@ -318,6 +340,7 @@ function validateDifferentialDiagnosis(sanitised: string): ValidationResult | nu
   // Citation (the Source line) is deliberately NOT required (product
   // decision: always attempt a best-effort list from whatever documented
   // symptoms/history exist, rather than refusing when evidence is thin).
+  const items: DifferentialDiagnosisItem[] = [];
   for (const block of blocks) {
     const parsed = parseConsiderationBlock(block);
     if (!parsed) {
@@ -331,7 +354,7 @@ function validateDifferentialDiagnosis(sanitised: string): ValidationResult | nu
     }
 
     // parseConsiderationBlock's Confidence regex already guarantees this can
-    // only be "low" or "moderate" — kept as defense-in-depth (belt-and-braces
+    // only be "Low" or "Moderate" — kept as defense-in-depth (belt-and-braces
     // against a future edit loosening that regex without updating this
     // alongside it), not as the primary enforcement.
     if (!DIFFERENTIAL_CONFIDENCE_LABELS.includes(parsed.confidence)) {
@@ -341,13 +364,15 @@ function validateDifferentialDiagnosis(sanitised: string): ValidationResult | nu
         code: "DIFFERENTIAL_STRUCTURE_INVALID",
       };
     }
+
+    items.push(parsed);
   }
 
-  return null;
+  return { ok: true, items };
 }
 
 export type ValidationResult =
-  | { ok: true; warnings: string[] }
+  | { ok: true; warnings: string[]; differentialDiagnosisItems?: DifferentialDiagnosisItem[] }
   | { ok: false; reason: string; code: string };
 
 export function validateResponse(
@@ -393,9 +418,15 @@ export function validateResponse(
 
   // 4b. DIFFERENTIAL_DIAGNOSIS: ranked list with locked confidence vocabulary
   // (or the fixed insufficient-evidence sentence). Citation is not required.
+  // Also extracts the structured {name, confidence, source} list alongside
+  // validation, for PPMS Core's persistent differential-diagnosis card (sent
+  // via the PLUGIN_DIFFERENTIAL_UPDATE postMessage) — the exact same blocks
+  // that passed validation here, never re-parsed a second time on the client.
+  let differentialDiagnosisItems: DifferentialDiagnosisItem[] | undefined;
   if (capability === "DIFFERENTIAL_DIAGNOSIS") {
     const result = validateDifferentialDiagnosis(sanitised);
-    if (result) return result;
+    if (!result.ok) return result;
+    differentialDiagnosisItems = result.items;
   }
 
   // 5. Warning patterns (soft — response allowed through with annotations)
@@ -403,5 +434,9 @@ export function validateResponse(
     ({ warning }) => warning,
   );
 
-  return { ok: true, warnings };
+  return {
+    ok: true,
+    warnings,
+    ...(differentialDiagnosisItems ? { differentialDiagnosisItems } : {}),
+  };
 }

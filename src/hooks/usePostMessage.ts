@@ -17,10 +17,11 @@ import {
   MSG_PLUGIN_ERROR,
   MSG_PLUGIN_CLOSE,
   MSG_PLUGIN_TOKEN_EXPIRED,
+  MSG_PLUGIN_DIFFERENTIAL_UPDATE,
 } from "@/lib/constants";
 import { validatePpmsInitMessage } from "@/lib/postmessage-validator";
-import type { CopilotSession } from "@/types/client";
-import type { PluginDraftConfirmedMessage } from "@/postmessage/types";
+import type { CopilotSession, DifferentialDiagnosisItem } from "@/types/client";
+import type { PluginDraftConfirmedMessage, PluginDifferentialUpdateMessage } from "@/postmessage/types";
 
 // Resolved at module load time — the value is embedded by Next.js at build time
 // for NEXT_PUBLIC_ variables. It is safe to read here.
@@ -37,6 +38,7 @@ export interface UsePostMessageReturn {
   sendError: (code: string, message: string) => void;
   sendClose: () => void;
   clearSession: () => void;
+  sendDifferentialUpdate: (visitId: string, items: DifferentialDiagnosisItem[]) => void;
 }
 
 export function usePostMessage(): UsePostMessageReturn {
@@ -143,5 +145,28 @@ export function usePostMessage(): UsePostMessageReturn {
 
   const clearSession = useCallback(() => setSession(null), []);
 
-  return { session, confirmDraft, requestTokenRefresh, sendError, sendClose, clearSession };
+  // Token is NOT included — same posture as confirmDraft. Only visitId plus
+  // the diagnosis list the doctor is already seeing in the Copilot's own tab.
+  const sendDifferentialUpdate = useCallback(
+    (visitId: string, items: DifferentialDiagnosisItem[]) => {
+      const msg: PluginDifferentialUpdateMessage = {
+        type: MSG_PLUGIN_DIFFERENTIAL_UPDATE,
+        pluginId: PLUGIN_ID,
+        visitId,
+        items,
+      };
+      postToParent(msg);
+    },
+    [],
+  );
+
+  return {
+    session,
+    confirmDraft,
+    requestTokenRefresh,
+    sendError,
+    sendClose,
+    clearSession,
+    sendDifferentialUpdate,
+  };
 }

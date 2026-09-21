@@ -478,6 +478,30 @@ describe("DIFFERENTIAL_DIAGNOSIS capability (consolidated path)", () => {
     }
   });
 
+  it("19. structured extraction: multi-item response yields correct {name, confidence, source} per item, source omitted when absent", async () => {
+    setProvider(makeMockProvider(buildConsolidatedResponseText(MULTI_ITEM_MIXED)));
+
+    const result = await generate();
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const section = result.data.differentialDiagnosis;
+      expect(section.ok).toBe(true);
+      if (section.ok) {
+        expect(section.differentialDiagnosisItems).toEqual([
+          { name: "Anterior uveitis", confidence: "Moderate", source: "V0 2024-06-15" },
+          { name: "Early cataract changes", confidence: "Low" },
+        ]);
+        // Explicit key-presence check: toEqual alone treats {source: undefined}
+        // as equal to an absent key, which wouldn't distinguish "omitted" from
+        // "present but undefined" — the contract requires the key be truly absent.
+        expect(
+          Object.prototype.hasOwnProperty.call(section.differentialDiagnosisItems![1], "source"),
+        ).toBe(false);
+      }
+    }
+  });
+
   it("16. DIFFERENTIAL_DIAGNOSIS no longer requires the strong disclaimer banner", () => {
     // The red "This is NOT a diagnosis" banner (ResponseArea's StrongDisclaimer)
     // was driven entirely by this config flag. It's been removed from the UI

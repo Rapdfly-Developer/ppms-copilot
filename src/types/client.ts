@@ -3,8 +3,21 @@
 
 // ── Consolidated generate types ───────────────────────────────────────────────
 
+// Structured view of one differential-diagnosis consideration — the same
+// blocks validateDifferentialDiagnosis() already parsed and approved, not a
+// second independent parse of the raw text. Confidence is exactly "Low" or
+// "Moderate" by construction (see validation/response.ts's parseConsiderationBlock —
+// the regex that finds the Confidence line only ever matches those two
+// words). Sent to PPMS Core via the PLUGIN_DIFFERENTIAL_UPDATE postMessage
+// for the persistent cross-tab differential-diagnosis card.
+export type DifferentialDiagnosisItem = {
+  name: string;
+  confidence: "Low" | "Moderate";
+  source?: string;
+};
+
 export type SectionOutcome =
-  | { ok: true; text: string; warnings: string[] }
+  | { ok: true; text: string; warnings: string[]; differentialDiagnosisItems?: DifferentialDiagnosisItem[] }
   | { ok: false; errorCode: string; errorMessage: string };
 
 export type CopilotData = {
