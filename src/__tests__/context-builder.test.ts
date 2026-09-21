@@ -147,6 +147,86 @@ describe("Clinical context builder", () => {
 
       expect(ctx.text).toContain("Reported medications: Patient reports taking over-the-counter artificial tears twice daily");
     });
+
+    it("includes refraction and visual acuity in the rendered visit text", async () => {
+      const visitWithRefractiveData = {
+        ...FIXTURE_VISIT_CURRENT,
+        refraction: {
+          re: { sph: "-3.00", cyl: "-0.50", axis: "180", va: "6/6", method: "Subjective" },
+          le: undefined,
+        },
+        visualAcuity: {
+          testMethod: "Snellen",
+          re: { unaided: "6/9", bestCorrected: "6/6" },
+          le: undefined,
+        },
+      };
+      vi.spyOn(ppmsClient, "getPatient").mockResolvedValue(FIXTURE_PATIENT);
+      vi.spyOn(ppmsClient, "getVisit").mockResolvedValue(visitWithRefractiveData);
+      vi.spyOn(ppmsClient, "getVisits").mockResolvedValue([]);
+      vi.spyOn(ppmsClient, "getAppointments").mockResolvedValue([]);
+      vi.spyOn(ppmsClient, "getTimeline").mockResolvedValue([]);
+
+      const ctx = await buildPatientContext({
+        token: FIXTURE_TOKEN,
+        capability: "REFRACTIVE_GUIDANCE",
+        patientRef: FIXTURE_PATIENT.udid,
+        visitId: FIXTURE_VISIT_CURRENT.visitId,
+      });
+
+      expect(ctx.text).toContain("Refraction: RE: Sph -3.00, Cyl -0.50, Axis 180, VA 6/6, Method Subjective");
+      expect(ctx.text).toContain("Visual Acuity: Snellen — RE: Unaided 6/9, Best corrected 6/6");
+    });
+
+    it("includes SUB-TAB DOCUMENTATION STATUS and surfaces DocumentedFlags on PatientContext.documented", async () => {
+      const documented = {
+        visualAcuity: true,
+        refraction: true,
+        anteriorSegment: false,
+        posteriorSegment: false,
+      };
+      const visitWithDocumentedFlags = { ...FIXTURE_VISIT_CURRENT, documented };
+      vi.spyOn(ppmsClient, "getPatient").mockResolvedValue(FIXTURE_PATIENT);
+      vi.spyOn(ppmsClient, "getVisit").mockResolvedValue(visitWithDocumentedFlags);
+      vi.spyOn(ppmsClient, "getVisits").mockResolvedValue([]);
+      vi.spyOn(ppmsClient, "getAppointments").mockResolvedValue([]);
+      vi.spyOn(ppmsClient, "getTimeline").mockResolvedValue([]);
+
+      const ctx = await buildPatientContext({
+        token: FIXTURE_TOKEN,
+        capability: "REFRACTIVE_GUIDANCE",
+        patientRef: FIXTURE_PATIENT.udid,
+        visitId: FIXTURE_VISIT_CURRENT.visitId,
+      });
+
+      expect(ctx.text).toContain("=== SUB-TAB DOCUMENTATION STATUS (computed — do not recalculate) ===");
+      expect(ctx.text).toContain("Visual Acuity: Documented");
+      expect(ctx.text).toContain("Refraction: Documented");
+      expect(ctx.text).toContain("Anterior Segment: Not documented");
+      expect(ctx.text).toContain("Posterior Segment: Not documented");
+      // The validator must check the model's claims against THIS original
+      // object, not against the rendered text above — confirm it's threaded
+      // through PatientContext, not just flattened into prose.
+      expect(ctx.documented).toEqual(documented);
+    });
+
+    it("omits SUB-TAB DOCUMENTATION STATUS and leaves PatientContext.documented undefined when absent", async () => {
+      vi.spyOn(ppmsClient, "getPatient").mockResolvedValue(FIXTURE_PATIENT);
+      vi.spyOn(ppmsClient, "getVisit").mockResolvedValue(FIXTURE_VISIT_CURRENT); // no `documented` field
+      vi.spyOn(ppmsClient, "getVisits").mockResolvedValue([]);
+      vi.spyOn(ppmsClient, "getAppointments").mockResolvedValue([]);
+      vi.spyOn(ppmsClient, "getTimeline").mockResolvedValue([]);
+
+      const ctx = await buildPatientContext({
+        token: FIXTURE_TOKEN,
+        capability: "REFRACTIVE_GUIDANCE",
+        patientRef: FIXTURE_PATIENT.udid,
+        visitId: FIXTURE_VISIT_CURRENT.visitId,
+      });
+
+      expect(ctx.text).not.toContain("SUB-TAB DOCUMENTATION STATUS");
+      expect(ctx.documented).toBeUndefined();
+    });
   });
 
   describe("Context stats", () => {

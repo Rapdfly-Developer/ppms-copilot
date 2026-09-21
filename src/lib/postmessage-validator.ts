@@ -1,8 +1,16 @@
 // Pure postMessage validation logic — no React, no server imports.
 // Extracted so it can be unit-tested independently of the React hook.
 
-import type { PpmsInitMessage, PpmsRequestExamGuidanceMessage } from "@/postmessage/types";
-import { MSG_PPMS_INIT, MSG_PPMS_REQUEST_EXAM_GUIDANCE } from "@/lib/constants";
+import type {
+  PpmsInitMessage,
+  PpmsRequestExamGuidanceMessage,
+  PpmsRequestRefractiveGuidanceMessage,
+} from "@/postmessage/types";
+import {
+  MSG_PPMS_INIT,
+  MSG_PPMS_REQUEST_EXAM_GUIDANCE,
+  MSG_PPMS_REQUEST_REFRACTIVE_GUIDANCE,
+} from "@/lib/constants";
 
 export type ValidatePpmsInitResult =
   | { ok: true; message: PpmsInitMessage }
@@ -104,4 +112,50 @@ export function validateRequestExamGuidanceMessage(
   }
 
   return { ok: true, message: data as unknown as PpmsRequestExamGuidanceMessage };
+}
+
+export type ValidateRequestRefractiveGuidanceResult =
+  | { ok: true; message: PpmsRequestRefractiveGuidanceMessage }
+  | { ok: false; reason: string };
+
+// Same fail-closed shape as validateRequestExamGuidanceMessage above —
+// visitId must match the session already established by PPMS_INIT, and an
+// optional token, when present, must be a genuine non-empty string.
+export function validateRequestRefractiveGuidanceMessage(
+  eventOrigin: string,
+  eventData: unknown,
+  expectedOrigin: string,
+  currentVisitId: string | null,
+): ValidateRequestRefractiveGuidanceResult {
+  if (!expectedOrigin) {
+    return { ok: false, reason: "no_expected_origin" };
+  }
+
+  if (expectedOrigin === "*" || eventOrigin !== expectedOrigin) {
+    return { ok: false, reason: "origin_mismatch" };
+  }
+
+  if (!eventData || typeof eventData !== "object") {
+    return { ok: false, reason: "data_not_object" };
+  }
+
+  const data = eventData as Record<string, unknown>;
+
+  if (data.type !== MSG_PPMS_REQUEST_REFRACTIVE_GUIDANCE) {
+    return { ok: false, reason: "wrong_type" };
+  }
+
+  if (typeof data.visitId !== "string" || !data.visitId.trim()) {
+    return { ok: false, reason: "missing_visitId" };
+  }
+
+  if (!currentVisitId || data.visitId !== currentVisitId) {
+    return { ok: false, reason: "visit_mismatch" };
+  }
+
+  if (data.token !== undefined && (typeof data.token !== "string" || !data.token.trim())) {
+    return { ok: false, reason: "invalid_token" };
+  }
+
+  return { ok: true, message: data as unknown as PpmsRequestRefractiveGuidanceMessage };
 }

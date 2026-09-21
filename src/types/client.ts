@@ -28,6 +28,35 @@ export type ExamGuidanceSection = {
   associatedFindingsNotDocumented: string;
 };
 
+// Structured view of REFRACTIVE_GUIDANCE's result — the same three blocks
+// validateRefractiveGuidance() already parsed, verified, and approved, not a
+// second independent parse. On-demand only, same transport shape as
+// EXAM_GUIDANCE: travels through DoneMeta.refractiveGuidanceResult on the
+// standalone /api/copilot/stream path, then out via the
+// PLUGIN_REFRACTIVE_GUIDANCE_RESULT postMessage.
+//
+// The four `*Documented` booleans on `routing` are the exact DocumentedFlags
+// values the server verified the model's routing claims against — not a
+// re-parse of the model's text. PPMS Core can trust them directly.
+export type RefractiveEyeGuidance = {
+  eye: "Right Eye" | "Left Eye";
+  documented: string;
+  interpretation: string;
+};
+
+export type RefractiveRoutingGuidance = {
+  visualAcuityDocumented: boolean;
+  refractionDocumented: boolean;
+  anteriorSegmentDocumented: boolean;
+  posteriorSegmentDocumented: boolean;
+  guidance: string;
+};
+
+export type RefractiveGuidanceResult = {
+  eyes: RefractiveEyeGuidance[]; // always [Right Eye, Left Eye], in that order
+  routing: RefractiveRoutingGuidance;
+};
+
 export type SectionOutcome =
   | { ok: true; text: string; warnings: string[]; differentialDiagnosisItems?: DifferentialDiagnosisItem[] }
   | { ok: false; errorCode: string; errorMessage: string };
@@ -66,6 +95,7 @@ export type Capability =
   | "ASSESSMENT_CONTEXT"
   | "SUGGESTED_QUESTIONS"
   | "EXAM_GUIDANCE"
+  | "REFRACTIVE_GUIDANCE"
   | "QUESTION";
 
 // Token stored only in memory — never in localStorage or cookies.
@@ -93,6 +123,10 @@ export interface DoneMeta {
   // Populated only for the EXAM_GUIDANCE capability once validated — the same
   // structured blocks validateExamGuidance() parsed server-side.
   examGuidanceSections?: ExamGuidanceSection[];
+  // Populated only for the REFRACTIVE_GUIDANCE capability once validated —
+  // the same structured result validateRefractiveGuidance() parsed and
+  // ground-truth-verified server-side.
+  refractiveGuidanceResult?: RefractiveGuidanceResult;
 }
 
 // Must exactly mirror the server-side NdjsonFrame union in src/service/copilot.ts.

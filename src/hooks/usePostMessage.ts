@@ -8,10 +8,11 @@
 //   - Silently ignores invalid messages — no error reveals to potential attackers.
 //   - Token is stored only in React state (memory), never in localStorage.
 //   - All outbound postMessages use targetOrigin = PPMS_ORIGIN (never "*").
-//   - PPMS_REQUEST_EXAM_GUIDANCE (the only other inbound message besides
-//     PPMS_INIT) additionally requires its visitId to match the session
-//     already established by PPMS_INIT — a stale/mismatched trigger is
-//     silently ignored rather than generating for the wrong visit.
+//   - PPMS_REQUEST_EXAM_GUIDANCE and PPMS_REQUEST_REFRACTIVE_GUIDANCE (the
+//     only other inbound messages besides PPMS_INIT) additionally require
+//     their visitId to match the session already established by PPMS_INIT —
+//     a stale/mismatched trigger is silently ignored rather than generating
+//     for the wrong visit.
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import {
@@ -23,13 +24,24 @@ import {
   MSG_PLUGIN_TOKEN_EXPIRED,
   MSG_PLUGIN_DIFFERENTIAL_UPDATE,
   MSG_PLUGIN_EXAM_GUIDANCE_RESULT,
+  MSG_PLUGIN_REFRACTIVE_GUIDANCE_RESULT,
 } from "@/lib/constants";
-import { validatePpmsInitMessage, validateRequestExamGuidanceMessage } from "@/lib/postmessage-validator";
-import type { CopilotSession, DifferentialDiagnosisItem, ExamGuidanceSection } from "@/types/client";
+import {
+  validatePpmsInitMessage,
+  validateRequestExamGuidanceMessage,
+  validateRequestRefractiveGuidanceMessage,
+} from "@/lib/postmessage-validator";
+import type {
+  CopilotSession,
+  DifferentialDiagnosisItem,
+  ExamGuidanceSection,
+  RefractiveGuidanceResult,
+} from "@/types/client";
 import type {
   PluginDraftConfirmedMessage,
   PluginDifferentialUpdateMessage,
   PluginExamGuidanceResultMessage,
+  PluginRefractiveGuidanceResultMessage,
 } from "@/postmessage/types";
 
 // Resolved at module load time — the value is embedded by Next.js at build time
@@ -49,6 +61,14 @@ export type ExamGuidanceResult =
   | { ok: true; sections: ExamGuidanceSection[] }
   | { ok: false; errorCode: string; errorMessage: string };
 
+// Same shape as ExamGuidanceRequest — see its comment for why requestedAt
+// and token exist.
+export type RefractiveGuidanceRequest = { visitId: string; token?: string; requestedAt: number };
+
+export type RefractiveGuidanceOutcome =
+  | { ok: true; result: RefractiveGuidanceResult }
+  | { ok: false; errorCode: string; errorMessage: string };
+
 export interface UsePostMessageReturn {
   session: CopilotSession | null;
   confirmDraft: (
@@ -63,11 +83,15 @@ export interface UsePostMessageReturn {
   sendDifferentialUpdate: (visitId: string, items: DifferentialDiagnosisItem[]) => void;
   examGuidanceRequest: ExamGuidanceRequest | null;
   sendExamGuidanceResult: (visitId: string, result: ExamGuidanceResult) => void;
+  refractiveGuidanceRequest: RefractiveGuidanceRequest | null;
+  sendRefractiveGuidanceResult: (visitId: string, result: RefractiveGuidanceOutcome) => void;
 }
 
 export function usePostMessage(): UsePostMessageReturn {
   const [session, setSession] = useState<CopilotSession | null>(null);
   const [examGuidanceRequest, setExamGuidanceRequest] = useState<ExamGuidanceRequest | null>(null);
+  const [refractiveGuidanceRequest, setRefractiveGuidanceRequest] =
+    useState<RefractiveGuidanceRequest | null>(null);
   // Track the source Window so replies go to the correct frame.
   const parentRef = useRef<MessageEventSource | null>(null);
   // Mirrors `session` for use inside handleMessage, which is registered once
@@ -124,6 +148,23 @@ export function usePostMessage(): UsePostMessageReturn {
         setExamGuidanceRequest({
           visitId: examResult.message.visitId,
           token: examResult.message.token,
+          requestedAt: Date.now(),
+        });
+        return;
+      }
+
+      // Not an EXAM_GUIDANCE trigger either — try the on-demand
+      // REFRACTIVE_GUIDANCE trigger, same fail-closed posture.
+      const refractiveResult = validateRequestRefractiveGuidanceMessage(
+        event.origin,
+        event.data,
+        PPMS_ORIGIN,
+        sessionRef.current?.visitId ?? null,
+      );
+      if (refractiveResult.ok) {
+        setRefractiveGuidanceRequest({
+          visitId: refractiveResult.message.visitId,
+          token: refractiveResult.message.token,
           requestedAt: Date.now(),
         });
       }
@@ -230,6 +271,32 @@ export function usePostMessage(): UsePostMessageReturn {
     postToParent(msg);
   }, []);
 
+  // Token is NOT included — same posture as sendExamGuidanceResult. Sent once
+  // per PPMS_REQUEST_REFRACTIVE_GUIDANCE, whether the on-demand generation it
+  // triggered succeeded or failed.
+  const sendRefractiveGuidanceResult = useCallback(
+    (visitId: string, result: RefractiveGuidanceOutcome) => {
+      const msg: PluginRefractiveGuidanceResultMessage = result.ok
+        ? {
+            type: MSG_PLUGIN_REFRACTIVE_GUIDANCE_RESULT,
+            pluginId: PLUGIN_ID,
+            visitId,
+            ok: true,
+            result: result.result,
+          }
+        : {
+            type: MSG_PLUGIN_REFRACTIVE_GUIDANCE_RESULT,
+            pluginId: PLUGIN_ID,
+            visitId,
+            ok: false,
+            errorCode: result.errorCode,
+            errorMessage: result.errorMessage,
+          };
+      postToParent(msg);
+    },
+    [],
+  );
+
   return {
     session,
     confirmDraft,
@@ -240,5 +307,7 @@ export function usePostMessage(): UsePostMessageReturn {
     sendDifferentialUpdate,
     examGuidanceRequest,
     sendExamGuidanceResult,
+    refractiveGuidanceRequest,
+    sendRefractiveGuidanceResult,
   };
 }

@@ -30,6 +30,8 @@ import {
   getAppointments,
   getTimeline,
   type VisitDTO,
+  type RefractionEye,
+  type VisualAcuityEye,
 } from "@/lib/ppms-client";
 import { toSafePatientSummary, estimateTokens } from "./pii";
 import {
@@ -79,6 +81,42 @@ async function fetchContext(
 
 // ── Section renderers ─────────────────────────────────────────────────────────
 
+// Renders one eye's non-empty fields as "Label value, Label value, ...", or
+// null if the eye has nothing documented. Shared shape for refraction and
+// visual acuity — both are per-eye field bags with the same "only render
+// what's present" rule as every other optional field in renderVisit.
+function renderEyeFields(fields: [label: string, value: string | undefined][]): string | null {
+  const parts = fields
+    .filter((f): f is [string, string] => !!f[1])
+    .map(([label, value]) => `${label} ${value}`);
+  return parts.length > 0 ? parts.join(", ") : null;
+}
+
+function renderRefractionEye(eye: RefractionEye | undefined): string | null {
+  if (!eye) return null;
+  return renderEyeFields([
+    ["Sph", eye.sph],
+    ["Cyl", eye.cyl],
+    ["Axis", eye.axis],
+    ["Near Sph", eye.nearSph],
+    ["VA", eye.va],
+    ["Near VA", eye.nearVa],
+    ["Method", eye.method],
+  ]);
+}
+
+function renderVisualAcuityEye(eye: VisualAcuityEye | undefined): string | null {
+  if (!eye) return null;
+  return renderEyeFields([
+    ["Unaided", eye.unaided],
+    ["Pinhole", eye.pinhole],
+    ["Best corrected", eye.bestCorrected],
+    ["Near unaided", eye.nearUnaided],
+    ["Near pinhole", eye.nearPinhole],
+    ["Near best corrected", eye.nearBestCorrected],
+  ]);
+}
+
 function renderDemographics(s: ReturnType<typeof toSafePatientSummary>): string {
   return [
     `Patient: ${s.ageAndSex}`,
@@ -105,6 +143,23 @@ function renderVisit(visit: VisitDTO, label: string): string {
   }
 
   if (visit.reportedMedications) lines.push(`Reported medications: ${visit.reportedMedications}`);
+
+  if (visit.refraction) {
+    const re = renderRefractionEye(visit.refraction.re);
+    const le = renderRefractionEye(visit.refraction.le);
+    const parts = [re && `RE: ${re}`, le && `LE: ${le}`].filter((p): p is string => !!p);
+    if (parts.length > 0) lines.push(`Refraction: ${parts.join("; ")}`);
+  }
+
+  if (visit.visualAcuity) {
+    const re = renderVisualAcuityEye(visit.visualAcuity.re);
+    const le = renderVisualAcuityEye(visit.visualAcuity.le);
+    const parts = [re && `RE: ${re}`, le && `LE: ${le}`].filter((p): p is string => !!p);
+    if (parts.length > 0) {
+      const method = visit.visualAcuity.testMethod ? `${visit.visualAcuity.testMethod} — ` : "";
+      lines.push(`Visual Acuity: ${method}${parts.join("; ")}`);
+    }
+  }
 
   if (visit.vitals) {
     const v = visit.vitals;
@@ -192,6 +247,21 @@ function renderFetchedContext(
   if (fetched.currentVisit) {
     sections.push("\n=== CURRENT VISIT (V0) ===");
     sections.push(renderVisit(fetched.currentVisit, "Current visit (V0)"));
+  }
+
+  // ── SUB-TAB DOCUMENTATION STATUS (computed) ──────────────────────────────
+  // Ground truth for REFRACTIVE_GUIDANCE's routing block — rendered here so
+  // the model can see and cite it, but the validator (validateRefractiveGuidance
+  // in validation/response.ts) checks the model's claims against the original
+  // DocumentedFlags object (threaded separately via PatientContext.documented),
+  // never against this rendering of it.
+  if (fetched.currentVisit?.documented) {
+    const d = fetched.currentVisit.documented;
+    sections.push("\n=== SUB-TAB DOCUMENTATION STATUS (computed — do not recalculate) ===");
+    sections.push(`Visual Acuity: ${d.visualAcuity ? "Documented" : "Not documented"}`);
+    sections.push(`Refraction: ${d.refraction ? "Documented" : "Not documented"}`);
+    sections.push(`Anterior Segment: ${d.anteriorSegment ? "Documented" : "Not documented"}`);
+    sections.push(`Posterior Segment: ${d.posteriorSegment ? "Documented" : "Not documented"}`);
   }
 
   // ── PREVIOUS VISITS ───────────────────────────────────────────────────────
@@ -297,7 +367,7 @@ export async function buildPatientContext(
     estimatedTokens: stats.estimatedTokens,
   });
 
-  return { text, stats, visitId };
+  return { text, stats, visitId, documented: fetched.currentVisit?.documented };
 }
 
 // Fetches the union of all MVP capabilities' data needs in one Promise.all,

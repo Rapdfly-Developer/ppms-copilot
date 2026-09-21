@@ -35,6 +35,17 @@ export const MSG_PPMS_REQUEST_EXAM_GUIDANCE = "PPMS_REQUEST_EXAM_GUIDANCE" as co
 // on the General and Ophthalmic tabs, outside this iframe.
 export const MSG_PLUGIN_EXAM_GUIDANCE_RESULT = "PLUGIN_EXAM_GUIDANCE_RESULT" as const;
 
+// REFRACTIVE_GUIDANCE is on-demand only, same pattern as EXAM_GUIDANCE — PPMS
+// Core sends this INTO the iframe (e.g. from a button on the Refraction /
+// Anterior Segment / Posterior Segment sub-tabs) to request generation.
+export const MSG_PPMS_REQUEST_REFRACTIVE_GUIDANCE = "PPMS_REQUEST_REFRACTIVE_GUIDANCE" as const;
+
+// Sent once per PPMS_REQUEST_REFRACTIVE_GUIDANCE, whether the resulting
+// on-demand generation succeeded or failed — carries either the structured
+// per-eye + routing result or an error, so PPMS Core can render/update its
+// shared refractive-guidance card across the three sub-tabs above.
+export const MSG_PLUGIN_REFRACTIVE_GUIDANCE_RESULT = "PLUGIN_REFRACTIVE_GUIDANCE_RESULT" as const;
+
 // API route paths (server-side only)
 export const COPILOT_STREAM_PATH = "/api/copilot/stream" as const;
 // Consolidated endpoint: one request → all six sections as structured JSON

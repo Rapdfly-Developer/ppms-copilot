@@ -23,15 +23,16 @@
 //     validates successfully (see lib/differential-update.ts) — visitId + the
 //     diagnosis list only, no token, so PPMS Core can render a persistent
 //     differential-diagnosis card outside this iframe.
-//   - EXAM_GUIDANCE is a SEPARATE, on-demand-only request — not part of the
-//     consolidated call. PPMS Core triggers it via PPMS_REQUEST_EXAM_GUIDANCE
-//     (e.g. a button on the General/Ophthalmic tabs), optionally carrying a
-//     FRESH plugin token minted for this specific trigger — used in place of
-//     the original (possibly since-expired) PPMS_INIT session token, see
-//     lib/on-demand-token.ts. This component runs the request through its own
-//     useCopilotStream instance and reports the result back via
-//     PLUGIN_EXAM_GUIDANCE_RESULT — visitId + the segment list only, no
-//     token in that OUTBOUND message, same posture as PLUGIN_DIFFERENTIAL_UPDATE.
+//   - EXAM_GUIDANCE and REFRACTIVE_GUIDANCE are SEPARATE, on-demand-only
+//     requests — not part of the consolidated call. PPMS Core triggers each
+//     via its own PPMS_REQUEST_* message (e.g. a button on the relevant
+//     sub-tabs), optionally carrying a FRESH plugin token minted for that
+//     specific trigger — used in place of the original (possibly
+//     since-expired) PPMS_INIT session token, see lib/on-demand-token.ts.
+//     This component runs each through its own useCopilotStream instance and
+//     reports the result back via its own PLUGIN_*_RESULT message — visitId
+//     + the structured result only, no token in either OUTBOUND message,
+//     same posture as PLUGIN_DIFFERENTIAL_UPDATE.
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { usePostMessage } from "@/hooks/usePostMessage";
@@ -336,9 +337,12 @@ export default function CopilotApp() {
     sendDifferentialUpdate,
     examGuidanceRequest,
     sendExamGuidanceResult,
+    refractiveGuidanceRequest,
+    sendRefractiveGuidanceResult,
   } = usePostMessage();
   const { state, generate, regenerate, cancel } = useCopilotGenerate();
   const examGuidanceStream = useCopilotStream();
+  const refractiveGuidanceStream = useCopilotStream();
   const [activeCapability, setActiveCapability] = useState<Capability>("PATIENT_SNAPSHOT");
   const [draftText, setDraftText] = useState("");
   const [draftConfirmed, setDraftConfirmed] = useState(false);
@@ -350,6 +354,8 @@ export default function CopilotApp() {
   // Strict Mode) doesn't fire a second AI call or send a duplicate result.
   const examGuidanceTriggeredForRef = useRef<number | null>(null);
   const examGuidanceResultSentForRef = useRef<number | null>(null);
+  const refractiveGuidanceTriggeredForRef = useRef<number | null>(null);
+  const refractiveGuidanceResultSentForRef = useRef<number | null>(null);
 
   // Trigger ONE consolidated generation when a new session arrives.
   // The ref guard prevents double-firing from React Strict Mode re-execution.
@@ -431,6 +437,53 @@ export default function CopilotApp() {
       });
     }
   }, [examGuidanceRequest, session, examGuidanceStream.state, sendExamGuidanceResult]);
+
+  // Trigger an on-demand REFRACTIVE_GUIDANCE generation when PPMS Core asks
+  // for one. Same shape as the EXAM_GUIDANCE effect above — separate
+  // request/hook from the consolidated flow, no cacheKey, fresh-token
+  // preferred over the session token (see lib/on-demand-token.ts).
+  useEffect(() => {
+    if (!refractiveGuidanceRequest || !session) return;
+    if (refractiveGuidanceTriggeredForRef.current === refractiveGuidanceRequest.requestedAt) return;
+    refractiveGuidanceTriggeredForRef.current = refractiveGuidanceRequest.requestedAt;
+    const token = resolveOnDemandToken(refractiveGuidanceRequest.token, session.token);
+    refractiveGuidanceStream.start("REFRACTIVE_GUIDANCE", token);
+  }, [refractiveGuidanceRequest, session, refractiveGuidanceStream]);
+
+  // Report the on-demand result back to PPMS Core once it settles, whether it
+  // succeeded or failed — same shape as the EXAM_GUIDANCE effect above.
+  useEffect(() => {
+    if (!refractiveGuidanceRequest || !session) return;
+    if (refractiveGuidanceResultSentForRef.current === refractiveGuidanceRequest.requestedAt) return;
+    const streamState = refractiveGuidanceStream.state;
+
+    if (streamState.status === "done") {
+      refractiveGuidanceResultSentForRef.current = refractiveGuidanceRequest.requestedAt;
+      // A "done" status always carries refractiveGuidanceResult — validateRefractiveGuidance
+      // only returns ok:true together with a result (see validation/response.ts).
+      // Its absence here would mean that invariant broke elsewhere; report it
+      // as an error rather than sending a malformed ok:true with no result.
+      if (streamState.doneMeta?.refractiveGuidanceResult) {
+        sendRefractiveGuidanceResult(session.visitId, {
+          ok: true,
+          result: streamState.doneMeta.refractiveGuidanceResult,
+        });
+      } else {
+        sendRefractiveGuidanceResult(session.visitId, {
+          ok: false,
+          errorCode: "INTERNAL_ERROR",
+          errorMessage: "An unexpected error occurred. Please try again.",
+        });
+      }
+    } else if (streamState.status === "error") {
+      refractiveGuidanceResultSentForRef.current = refractiveGuidanceRequest.requestedAt;
+      sendRefractiveGuidanceResult(session.visitId, {
+        ok: false,
+        errorCode: streamState.errorCode ?? "INTERNAL_ERROR",
+        errorMessage: streamState.errorMessage ?? "An unexpected error occurred. Please try again.",
+      });
+    }
+  }, [refractiveGuidanceRequest, session, refractiveGuidanceStream.state, sendRefractiveGuidanceResult]);
 
   // Periodic re-render to detect expiry.
   const [, setTick] = useState(0);

@@ -16,7 +16,13 @@
 // the first). Both layers must always be present and neither can be bypassed.
 
 import type { Capability } from "@/capabilities";
-import type { DifferentialDiagnosisItem, ExamGuidanceSection } from "@/types/client";
+import type {
+  DifferentialDiagnosisItem,
+  ExamGuidanceSection,
+  RefractiveGuidanceResult,
+  RefractiveEyeGuidance,
+} from "@/types/client";
+import type { DocumentedFlags } from "@/lib/ppms-client";
 
 // ── Pre-sanitiser ─────────────────────────────────────────────────────────────
 // Rewrites benign documentary phrases that incidentally match a forbidden
@@ -371,26 +377,20 @@ function validateDifferentialDiagnosis(sanitised: string): DifferentialValidatio
   return { ok: true, items };
 }
 
-// ── EXAM_GUIDANCE structural + imperative-language requirements ─────────────
-// The prompt locks the model to exactly two fixed segment blocks — Anterior
-// Segment, then Posterior Segment — each with a Documented line and an
-// Associated-findings line. This is a documentary correlation, never an
-// instruction, so imperative openers ("Check", "Assess", ...) are a hard
-// reject independent of block structure, same enforcement position as
-// DIFFERENTIAL_CERTAINTY_PATTERNS above.
-
-const EXAM_GUIDANCE_SEGMENTS = ["Anterior Segment", "Posterior Segment"] as const;
-
-const EXAM_GUIDANCE_NO_DATA_SENTENCE =
-  "The documented record does not contain sufficient findings to correlate exam guidance at this time.";
-
+// ── Shared imperative-language check ──────────────────────────────────────────
+// Any capability whose task is a documentary correlation of exam-adjacent
+// findings — never an instruction — needs this same hard reject. Originally
+// EXAM_GUIDANCE-only (EXAM_GUIDANCE_IMPERATIVE_PATTERNS); extracted here when
+// REFRACTIVE_GUIDANCE needed the identical check, rather than a second
+// copy-pasted list that could quietly drift from the first.
+//
 // Whole-word matched anywhere in the section — deliberately not anchored to
 // sentence-start position. This is intentionally broader than it needs to be
 // (e.g. "in order to" or "the investigation was ordered" would also trip
 // "Order"), trading a theoretical false-positive for a simpler, unambiguous
-// rule given this capability's narrow, current-visit-only data scope makes
+// rule given these capabilities' narrow, current-visit-only data scope makes
 // such incidental collisions unlikely in practice.
-const EXAM_GUIDANCE_IMPERATIVE_PATTERNS: RegExp[] = [
+const IMPERATIVE_LANGUAGE_PATTERNS: RegExp[] = [
   /\bCheck\b/i,
   /\bExamine\b/i,
   /\bLook for\b/i,
@@ -403,6 +403,16 @@ const EXAM_GUIDANCE_IMPERATIVE_PATTERNS: RegExp[] = [
   /\bScreen for\b/i,
   /\bInvestigate\b/i,
 ];
+
+// ── EXAM_GUIDANCE structural requirements ────────────────────────────────────
+// The prompt locks the model to exactly two fixed segment blocks — Anterior
+// Segment, then Posterior Segment — each with a Documented line and an
+// Associated-findings line.
+
+const EXAM_GUIDANCE_SEGMENTS = ["Anterior Segment", "Posterior Segment"] as const;
+
+const EXAM_GUIDANCE_NO_DATA_SENTENCE =
+  "The documented record does not contain sufficient findings to correlate exam guidance at this time.";
 
 // Tolerates a stray leading "## ..." heading line, same defense-in-depth
 // reasoning as extractConsiderationsSection above: this text is embedded as
@@ -469,7 +479,7 @@ type ExamGuidanceValidation =
 // validateDifferentialDiagnosis above — the returned sections are the exact
 // blocks that passed validation here, never re-parsed on the client.
 function validateExamGuidance(sanitised: string): ExamGuidanceValidation {
-  for (const pattern of EXAM_GUIDANCE_IMPERATIVE_PATTERNS) {
+  for (const pattern of IMPERATIVE_LANGUAGE_PATTERNS) {
     if (pattern.test(sanitised)) {
       return {
         ok: false,
@@ -515,12 +525,184 @@ function validateExamGuidance(sanitised: string): ExamGuidanceValidation {
   return { ok: true, sections };
 }
 
+// ── REFRACTIVE_GUIDANCE structural + ground-truth requirements ──────────────
+// The prompt locks the model to exactly three blocks — Right Eye, Left Eye,
+// Routing — in that order. The two eye blocks follow the same
+// Documented/interpretation two-field shape (with the same wrap-tolerant
+// forward-scan as parseExamGuidanceBlock). The Routing block is different in
+// kind: its four sub-tab lines are not free text to validate structurally —
+// they are checked against the REAL DocumentedFlags object passed in as
+// `documented`, and ANY mismatch fails the whole response closed. This is the
+// safety property the whole capability exists to prove: the model phrases
+// the sentence, it never gets to decide the fact.
+
+const REFRACTIVE_EYES = ["Right Eye", "Left Eye"] as const;
+
+// Unlike EXAM_GUIDANCE's whole-response fallback, each eye's fallback is
+// independent — one eye can have documented refraction/VA while the other
+// doesn't. So there's no single "is the whole response exactly this
+// sentence" check to make here: the fallback pair the prompt specifies
+// ("No refraction or visual acuity documented..." / "No refractive
+// interpretation possible...") is just ordinary non-empty field text as far
+// as parseRefractiveEyeBlock is concerned, same as any other Documented/
+// interpretation content.
+
+// Fixed label → DocumentedFlags key, in the exact order the prompt specifies.
+const REFRACTIVE_ROUTING_FIELDS: { label: string; key: keyof DocumentedFlags }[] = [
+  { label: "Visual Acuity", key: "visualAcuity" },
+  { label: "Refraction", key: "refraction" },
+  { label: "Anterior Segment", key: "anteriorSegment" },
+  { label: "Posterior Segment", key: "posteriorSegment" },
+];
+
+// Parses one eye block against the exact field order the prompt specifies: a
+// "[Eye Name]" opener line, "Documented: ..." line, and "Refractive
+// interpretation: ..." line. Either field may wrap across multiple
+// hard-newlined lines — same forward-scan tolerance as parseExamGuidanceBlock
+// above, same realistic model-drift reasoning.
+function parseRefractiveEyeBlock(block: string, expectedEye: string): RefractiveEyeGuidance | null {
+  const lines = block.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
+  if (lines.length < 3) return null;
+
+  const headerMatch = lines[0].match(/^\[(.+)\]$/);
+  if (!headerMatch || headerMatch[1].trim() !== expectedEye) return null;
+
+  const interpretationIndex = lines.findIndex(
+    (l, idx) => idx >= 1 && /^Refractive interpretation:/i.test(l),
+  );
+  if (interpretationIndex === -1) return null;
+
+  const documentedLines = lines.slice(1, interpretationIndex);
+  if (documentedLines.length === 0) return null;
+  const firstDocMatch = documentedLines[0].match(/^Documented:\s*(.*)$/i);
+  if (!firstDocMatch) return null;
+  const documented = [firstDocMatch[1], ...documentedLines.slice(1)].join(" ").trim();
+  if (!documented) return null;
+
+  const interpretationLines = lines.slice(interpretationIndex);
+  const firstInterpMatch = interpretationLines[0].match(/^Refractive interpretation:\s*(.*)$/i);
+  if (!firstInterpMatch) return null;
+  const interpretation = [firstInterpMatch[1], ...interpretationLines.slice(1)].join(" ").trim();
+  if (!interpretation) return null;
+
+  return { eye: expectedEye as "Right Eye" | "Left Eye", documented, interpretation };
+}
+
+// Parses the [Routing] block: four fixed-label "Documented"/"Not documented"
+// lines, each cross-checked against the real `documented` flags — a claim
+// that doesn't match the ground truth fails the block, not just that field —
+// followed by a free-text "Guidance:" line (same wrap tolerance as elsewhere).
+function parseRefractiveRoutingBlock(
+  block: string,
+  documented: DocumentedFlags,
+): RefractiveGuidanceResult["routing"] | null {
+  const lines = block.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
+  if (lines.length < 2 + REFRACTIVE_ROUTING_FIELDS.length) return null;
+
+  const headerMatch = lines[0].match(/^\[(.+)\]$/);
+  if (!headerMatch || headerMatch[1].trim() !== "Routing") return null;
+
+  const flags: Partial<Record<keyof DocumentedFlags, boolean>> = {};
+  for (let i = 0; i < REFRACTIVE_ROUTING_FIELDS.length; i++) {
+    const { label, key } = REFRACTIVE_ROUTING_FIELDS[i];
+    const line = lines[1 + i];
+    if (!line) return null;
+    const match = line.match(/^([A-Za-z ]+):\s*(Documented|Not documented)\s*$/i);
+    if (!match || match[1].trim() !== label) return null;
+    const claimed = match[2].toLowerCase() === "documented";
+    if (claimed !== documented[key]) return null; // ground-truth mismatch — fail closed
+    flags[key] = claimed;
+  }
+
+  const guidanceLines = lines.slice(1 + REFRACTIVE_ROUTING_FIELDS.length);
+  if (guidanceLines.length === 0) return null;
+  const firstGuidanceMatch = guidanceLines[0].match(/^Guidance:\s*(.*)$/i);
+  if (!firstGuidanceMatch) return null;
+  const guidance = [firstGuidanceMatch[1], ...guidanceLines.slice(1)].join(" ").trim();
+  if (!guidance) return null;
+
+  return {
+    visualAcuityDocumented: flags.visualAcuity!,
+    refractionDocumented: flags.refraction!,
+    anteriorSegmentDocumented: flags.anteriorSegment!,
+    posteriorSegmentDocumented: flags.posteriorSegment!,
+    guidance,
+  };
+}
+
+type RefractiveGuidanceValidation =
+  | { ok: true; result: RefractiveGuidanceResult }
+  | { ok: false; reason: string; code: string };
+
+function validateRefractiveGuidance(
+  sanitised: string,
+  documented: DocumentedFlags | undefined,
+): RefractiveGuidanceValidation {
+  for (const pattern of IMPERATIVE_LANGUAGE_PATTERNS) {
+    if (pattern.test(sanitised)) {
+      return {
+        ok: false,
+        reason: "Contains imperative/instructional language outside the permitted documentary framing",
+        code: "RESPONSE_UNSAFE",
+      };
+    }
+  }
+
+  // No ground truth available — fail closed rather than validating routing
+  // claims against nothing, which would let any claim through unchecked.
+  if (!documented) {
+    return {
+      ok: false,
+      reason: "Missing sub-tab documentation status — cannot verify routing claims",
+      code: "REFRACTIVE_GUIDANCE_STRUCTURE_INVALID",
+    };
+  }
+
+  const rawBlocks = sanitised.trim().split(/\n\s*\n/).map((b) => b.trim()).filter(Boolean);
+  if (rawBlocks.length !== 3) {
+    return {
+      ok: false,
+      reason: "Response must contain exactly 3 blocks (Right Eye, Left Eye, Routing, in that order)",
+      code: "REFRACTIVE_GUIDANCE_STRUCTURE_INVALID",
+    };
+  }
+
+  const eyes: RefractiveEyeGuidance[] = [];
+  for (let i = 0; i < REFRACTIVE_EYES.length; i++) {
+    const parsed = parseRefractiveEyeBlock(rawBlocks[i], REFRACTIVE_EYES[i]);
+    if (!parsed) {
+      return {
+        ok: false,
+        reason:
+          `Block ${i + 1} does not match the required "[${REFRACTIVE_EYES[i]}]" / Documented / ` +
+          "Refractive interpretation format, in that order",
+        code: "REFRACTIVE_GUIDANCE_STRUCTURE_INVALID",
+      };
+    }
+    eyes.push(parsed);
+  }
+
+  const routing = parseRefractiveRoutingBlock(rawBlocks[2], documented);
+  if (!routing) {
+    return {
+      ok: false,
+      reason:
+        "Routing block does not match the required format, or its claims do not match the " +
+        "actual sub-tab documentation status",
+      code: "REFRACTIVE_GUIDANCE_STRUCTURE_INVALID",
+    };
+  }
+
+  return { ok: true, result: { eyes, routing } };
+}
+
 export type ValidationResult =
   | {
       ok: true;
       warnings: string[];
       differentialDiagnosisItems?: DifferentialDiagnosisItem[];
       examGuidanceSections?: ExamGuidanceSection[];
+      refractiveGuidanceResult?: RefractiveGuidanceResult;
     }
   | { ok: false; reason: string; code: string };
 
@@ -528,6 +710,7 @@ export function validateResponse(
   text: string,
   capability: Capability,
   stopReason?: string,
+  groundTruth?: { documented?: DocumentedFlags },
 ): ValidationResult {
   // 0. Pre-sanitise benign surface-pattern matches before hard checks
   const sanitised = sanitiseResponse(text);
@@ -592,6 +775,17 @@ export function validateResponse(
     examGuidanceSections = result.sections;
   }
 
+  // 4d. REFRACTIVE_GUIDANCE: two eye blocks plus a routing block whose four
+  // sub-tab claims are cross-checked against groundTruth.documented (the real
+  // DocumentedFlags PPMS Core computed) — not just structurally validated.
+  // On-demand only, same transport as EXAM_GUIDANCE.
+  let refractiveGuidanceResult: RefractiveGuidanceResult | undefined;
+  if (capability === "REFRACTIVE_GUIDANCE") {
+    const result = validateRefractiveGuidance(sanitised, groundTruth?.documented);
+    if (!result.ok) return result;
+    refractiveGuidanceResult = result.result;
+  }
+
   // 5. Warning patterns (soft — response allowed through with annotations)
   const warnings = WARNING_PATTERNS.filter(({ pattern }) => pattern.test(sanitised)).map(
     ({ warning }) => warning,
@@ -602,5 +796,6 @@ export function validateResponse(
     warnings,
     ...(differentialDiagnosisItems ? { differentialDiagnosisItems } : {}),
     ...(examGuidanceSections ? { examGuidanceSections } : {}),
+    ...(refractiveGuidanceResult ? { refractiveGuidanceResult } : {}),
   };
 }

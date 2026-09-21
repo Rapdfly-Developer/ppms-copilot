@@ -135,10 +135,13 @@ export async function* streamCopilotResponse(
   }
 
   // 7. Validate accumulated response
+  // groundTruth.documented is only read by REFRACTIVE_GUIDANCE's validator —
+  // harmless to pass for every other capability, which ignores it.
   const validation = validateResponse(
     accumulatedText,
     capability,
     doneMeta.stopReason as string | undefined,
+    { documented: context.documented },
   );
 
   const safetyResult = !validation.ok
@@ -206,6 +209,13 @@ export async function* streamCopilotResponse(
       // the PLUGIN_EXAM_GUIDANCE_RESULT postMessage.
       ...(validation.examGuidanceSections
         ? { examGuidanceSections: validation.examGuidanceSections }
+        : {}),
+      // Only set for REFRACTIVE_GUIDANCE — the exact per-eye + routing result
+      // that passed structural AND ground-truth validation above, never
+      // re-parsed on the client. Carried by CopilotApp.tsx into the
+      // PLUGIN_REFRACTIVE_GUIDANCE_RESULT postMessage.
+      ...(validation.refractiveGuidanceResult
+        ? { refractiveGuidanceResult: validation.refractiveGuidanceResult }
         : {}),
     },
   };

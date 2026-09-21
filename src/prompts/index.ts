@@ -154,6 +154,70 @@ Rules for this response:
 - Only if the documented chief complaint, HPI, past medical history, allergies, vitals, and reported medications are ALL absent or contain nothing clinically relevant to correlate from either segment, write this exact sentence and nothing else in this section: "The documented record does not contain sufficient findings to correlate exam guidance at this time."
 - Do not fabricate documented details that are not present. State only documentary correlations — never recommend, instruct, or imply any clinical action.`;
 
+// ── Refractive Guidance instructions ──────────────────────────────────────────
+// REFRACTIVE_GUIDANCE is on-demand only, same pattern as EXAM_GUIDANCE —
+// triggered via PPMS_REQUEST_REFRACTIVE_GUIDANCE from a button shared across
+// the Refraction, Anterior Segment, and Posterior Segment sub-tabs, answered
+// through the standalone /api/copilot/stream path.
+//
+// The routing block's four documentation-status lines are NOT determined by
+// the model — they are given as fact in the SUB-TAB DOCUMENTATION STATUS
+// section of the patient record (see context/builder.ts), and the model's
+// job is only to copy them into the fixed format below. validateRefractiveGuidance
+// (validation/response.ts) independently re-checks every line against the
+// original DocumentedFlags object and rejects the whole response on any
+// mismatch — this prompt instruction is a first layer, not the enforcement.
+
+const REFRACTIVE_GUIDANCE_INSTRUCTIONS = `Task: Using the documented demographics, chief complaint, refraction findings (sphere/cylinder/axis per eye), and visual acuity, provide a refractive interpretation for each eye, then a routing summary stating which Ophthalmic sub-tabs (Visual Acuity, Refraction, Anterior Segment, Posterior Segment) are already documented for this visit. This is a documentary correlation for the doctor's own reference — NOT an instruction to perform any examination, test, or action.
+
+DATA LIMITATION — you do not have access to:
+- Anterior Segment or Posterior Segment exam findings themselves — only whether those sub-tabs have been documented at all for this visit, which is given to you as fact below
+- Investigation results or diagnoses from this visit
+- The patient's occupation, cost, or affordability considerations — do not reason about or mention any of these
+Do not imply access to findings you do not have, and do not suggest ordering any investigation.
+
+SUB-TAB DOCUMENTATION STATUS — given as fact, do not recalculate or contradict: the patient record includes a line for each of Visual Acuity, Refraction, Anterior Segment, and Posterior Segment stating whether it is documented for this visit. Copy these exact values into the Routing block below — you determine nothing here, you only phrase the Guidance sentence.
+
+Structure your response as EXACTLY three blocks, in this exact order, with a blank line between them and no blank line within a block:
+
+[Right Eye]
+Documented: [Sphere, cylinder, axis, method, and visual acuity documented for this eye, with visit source. If neither refraction nor visual acuity is documented for this eye, write exactly: "No refraction or visual acuity documented for this eye at this visit."]
+Refractive interpretation: [What the documented refraction and visual acuity suggest about this eye's refractive status — degree and type of refractive error — correlated with the documented chief complaint where relevant. If the Documented line above has no data, write exactly: "No refractive interpretation possible without documented refraction or visual acuity."]
+
+[Left Eye]
+Documented: [same instructions as above, for the left eye]
+Refractive interpretation: [same instructions as above, for the left eye]
+
+[Routing]
+Visual Acuity: [Documented / Not documented — copy the given fact exactly]
+Refraction: [Documented / Not documented — copy the given fact exactly]
+Anterior Segment: [Documented / Not documented — copy the given fact exactly]
+Posterior Segment: [Documented / Not documented — copy the given fact exactly]
+Guidance: [One sentence, based only on the four lines above, describing whether the doctor may wish to visit any remaining undocumented sub-tabs before proceeding, or may proceed to Assessment/Plan. Describe, do not direct.]
+
+For example, given a record documenting Sph -3.00 / Cyl -0.50 / Axis 180 (Subjective) and VA 6/9 improving to 6/6 for the right eye, no refraction or visual acuity documented for the left eye, and a SUB-TAB DOCUMENTATION STATUS of Visual Acuity=Documented, Refraction=Documented, Anterior Segment=Not documented, Posterior Segment=Not documented:
+
+[Right Eye]
+Documented: Sph -3.00, Cyl -0.50, Axis 180 (Subjective), VA 6/9 unaided improving to 6/6 with correction, at V0 2024-06-15.
+Refractive interpretation: Moderate myopia with mild astigmatism, consistent with the documented chief complaint of blurred vision.
+
+[Left Eye]
+Documented: No refraction or visual acuity documented for this eye at this visit.
+Refractive interpretation: No refractive interpretation possible without documented refraction or visual acuity.
+
+[Routing]
+Visual Acuity: Documented
+Refraction: Documented
+Anterior Segment: Not documented
+Posterior Segment: Not documented
+Guidance: Anterior Segment and Posterior Segment have not yet been documented for this visit; Visual Acuity and Refraction are already recorded.
+
+Rules for this response:
+- Never phrase any line as an instruction or action. Do not begin any line with, or otherwise use, words like "Check," "Examine," "Look for," "Assess," "Rule out," "Perform," "Test for," "Evaluate," "Order," "Screen for," or "Investigate."
+- The four Routing lines MUST exactly match the given documentation-status facts — never state "Documented" or "Not documented" other than what is given to you, for any reason.
+- Do not fabricate documented details that are not present. State only documentary correlations — never recommend, instruct, or imply any clinical action.
+- This task does not cover occupation, cost, affordability, or investigation-ordering — do not reason about or mention any of these, even if they appear elsewhere in the record.`;
+
 // ── Capability-specific instructions ─────────────────────────────────────────
 
 const CAPABILITY_INSTRUCTIONS: Record<Capability, string> = {
@@ -439,6 +503,8 @@ Rules:
 - If the record appears complete for the documented visit scope, state exactly: "No significant documentation gaps identified."`,
 
   EXAM_GUIDANCE: EXAM_GUIDANCE_INSTRUCTIONS,
+
+  REFRACTIVE_GUIDANCE: REFRACTIVE_GUIDANCE_INSTRUCTIONS,
 
   QUESTION: `Task: Answer the doctor's question based strictly on the documented patient record.
 

@@ -16,6 +16,7 @@ export const CAPABILITIES = {
   ASSESSMENT_CONTEXT: "ASSESSMENT_CONTEXT",
   SUGGESTED_QUESTIONS: "SUGGESTED_QUESTIONS",
   EXAM_GUIDANCE: "EXAM_GUIDANCE",
+  REFRACTIVE_GUIDANCE: "REFRACTIVE_GUIDANCE",
   QUESTION: "QUESTION",
 } as const;
 
@@ -201,6 +202,24 @@ export const CAPABILITY_CONFIG: Record<Capability, CapabilityConfig> = {
     // DIFFERENTIAL_DIAGNOSIS's budget, which does comparably open-ended
     // reasoning over a similar amount of documented input.
     maxTokens: 1400,
+    permission: "ai.copilot.draft",
+    producesDraft: false,
+    reasoningEffort: "high",
+    modelTier: "reasoning",
+  },
+  REFRACTIVE_GUIDANCE: {
+    label: "Refractive Guidance",
+    description:
+      "Correlates documented refraction and visual acuity into a per-eye refractive interpretation, plus routing guidance for the remaining Ophthalmic sub-tabs",
+    // Refraction, visual acuity, and the sub-tab documentation-status flags
+    // are all current-visit-only — no visit history needed.
+    includes: { demographics: true, currentVisit: true, visitHistory: false, appointments: false, timeline: false },
+    visitLimit: 1,
+    // 1600: a starting estimate, not yet live-tested — above EXAM_GUIDANCE's
+    // 1400 to cover two full eye blocks (vs. one segment pair) plus the
+    // routing block. Treat as provisional; adjust based on real Groq
+    // behavior the same way EXAM_GUIDANCE's budget was tuned twice already.
+    maxTokens: 1600,
     permission: "ai.copilot.draft",
     producesDraft: false,
     reasoningEffort: "high",

@@ -11,14 +11,20 @@ import {
   PLUGIN_ID,
   MSG_PPMS_INIT,
   MSG_PPMS_REQUEST_EXAM_GUIDANCE,
+  MSG_PPMS_REQUEST_REFRACTIVE_GUIDANCE,
   MSG_PLUGIN_READY,
   MSG_PLUGIN_DRAFT_CONFIRMED,
   MSG_PLUGIN_ERROR,
   MSG_PLUGIN_CLOSE,
   MSG_PLUGIN_DIFFERENTIAL_UPDATE,
   MSG_PLUGIN_EXAM_GUIDANCE_RESULT,
+  MSG_PLUGIN_REFRACTIVE_GUIDANCE_RESULT,
 } from "@/lib/constants";
-import type { DifferentialDiagnosisItem, ExamGuidanceSection } from "@/types/client";
+import type {
+  DifferentialDiagnosisItem,
+  ExamGuidanceSection,
+  RefractiveGuidanceResult,
+} from "@/types/client";
 
 // ── Inbound: messages PPMS Core sends TO the Copilot ─────────────────────────
 
@@ -50,7 +56,21 @@ export type PpmsRequestExamGuidanceMessage = {
   token?: string;
 };
 
-export type InboundPluginMessage = PpmsInitMessage | PpmsRequestExamGuidanceMessage;
+// Sent by PPMS Core (a button shared across the Refraction / Anterior
+// Segment / Posterior Segment sub-tabs) to request an on-demand
+// REFRACTIVE_GUIDANCE generation. Same optional fresh-token posture as
+// PpmsRequestExamGuidanceMessage, built in from the start this time.
+export type PpmsRequestRefractiveGuidanceMessage = {
+  type: typeof MSG_PPMS_REQUEST_REFRACTIVE_GUIDANCE;
+  pluginId: string;
+  visitId: string;
+  token?: string;
+};
+
+export type InboundPluginMessage =
+  | PpmsInitMessage
+  | PpmsRequestExamGuidanceMessage
+  | PpmsRequestRefractiveGuidanceMessage;
 
 // ── Outbound: messages the Copilot sends TO PPMS Core ────────────────────────
 
@@ -117,10 +137,33 @@ export type PluginExamGuidanceResultMessage =
       errorMessage: string;
     };
 
+// Sent once per PPMS_REQUEST_REFRACTIVE_GUIDANCE, whether the on-demand
+// generation it triggered succeeded or failed. Same no-token,
+// no-PHI-beyond-what's-already-sent posture as PluginExamGuidanceResultMessage:
+// `result` carries only the per-eye interpretation and routing guidance the
+// doctor already sees rendered in the Copilot's own output.
+export type PluginRefractiveGuidanceResultMessage =
+  | {
+      type: typeof MSG_PLUGIN_REFRACTIVE_GUIDANCE_RESULT;
+      pluginId: typeof PLUGIN_ID;
+      visitId: string;
+      ok: true;
+      result: RefractiveGuidanceResult;
+    }
+  | {
+      type: typeof MSG_PLUGIN_REFRACTIVE_GUIDANCE_RESULT;
+      pluginId: typeof PLUGIN_ID;
+      visitId: string;
+      ok: false;
+      errorCode: string;
+      errorMessage: string;
+    };
+
 export type OutboundPluginMessage =
   | PluginReadyMessage
   | PluginDraftConfirmedMessage
   | PluginErrorMessage
   | PluginCloseMessage
   | PluginDifferentialUpdateMessage
-  | PluginExamGuidanceResultMessage;
+  | PluginExamGuidanceResultMessage
+  | PluginRefractiveGuidanceResultMessage;

@@ -55,6 +55,38 @@ export type InvestigationDTO = {
   notes?: string;
 };
 
+export type RefractionEye = {
+  sph?: string;
+  cyl?: string;
+  axis?: string;
+  nearSph?: string;
+  va?: string;
+  nearVa?: string;
+  method?: string;
+};
+
+export type VisualAcuityEye = {
+  unaided?: string;
+  pinhole?: string;
+  bestCorrected?: string;
+  nearUnaided?: string;
+  nearPinhole?: string;
+  nearBestCorrected?: string;
+};
+
+// Precomputed by PPMS Core — whether each of these Ophthalmic sub-tabs has
+// any data recorded for this visit. Used as ground truth for
+// REFRACTIVE_GUIDANCE's routing block: the AI only phrases the sentence, it
+// never determines these booleans itself (see validateRefractiveGuidance in
+// validation/response.ts, which rejects any response whose routing claims
+// don't match these exact values).
+export type DocumentedFlags = {
+  visualAcuity: boolean;
+  refraction: boolean;
+  anteriorSegment: boolean;
+  posteriorSegment: boolean;
+};
+
 export type VisitDTO = {
   visitId: string;
   date: string;
@@ -74,6 +106,9 @@ export type VisitDTO = {
     temperature?: string;
     weight?: string;
   };
+  refraction?: { re?: RefractionEye; le?: RefractionEye };
+  visualAcuity?: { testMethod?: string; re?: VisualAcuityEye; le?: VisualAcuityEye };
+  documented?: DocumentedFlags;
   diagnoses: DiagnosisDTO[];
   medications: MedicationDTO[];
   investigations: InvestigationDTO[];

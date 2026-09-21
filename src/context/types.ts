@@ -1,5 +1,5 @@
 import type { Capability } from "@/capabilities";
-import type { PatientDTO, VisitDTO, AppointmentDTO, TimelineEventDTO } from "@/lib/ppms-client";
+import type { PatientDTO, VisitDTO, AppointmentDTO, TimelineEventDTO, DocumentedFlags } from "@/lib/ppms-client";
 
 // Raw data fetched from PPMS Core APIs before context building
 export type FetchedContext = {
@@ -23,6 +23,12 @@ export type PatientContext = {
   text: string;       // clinical context text; fenced in <patient_record> by PromptBuilder
   stats: ContextStats;
   visitId: string;    // kept for audit correlation — NOT included in the AI context text
+  // Ground truth for REFRACTIVE_GUIDANCE's routing-claim verification (see
+  // validateRefractiveGuidance) — populated only when the current visit has
+  // it. Deliberately NOT derived from the rendered text: the validator must
+  // check the model's claims against this original data, not against a
+  // rendering of it the model already saw.
+  documented?: DocumentedFlags;
   // Deliberately no patientRef, patientId, or name — those stay in the token
 };
 
