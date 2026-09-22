@@ -23,6 +23,10 @@
 //     validates successfully (see lib/differential-update.ts) — visitId + the
 //     diagnosis list only, no token, so PPMS Core can render a persistent
 //     differential-diagnosis card outside this iframe.
+//   - PLUGIN_PLAN_GUIDANCE_UPDATE is sent automatically once planGuidance
+//     validates successfully (see lib/plan-guidance-update.ts), same eager
+//     pattern as PLUGIN_DIFFERENTIAL_UPDATE — visitId + the structured
+//     PlanGuidanceResult only, no token.
 //   - EXAM_GUIDANCE and REFRACTIVE_GUIDANCE are SEPARATE, on-demand-only
 //     requests — not part of the consolidated call. PPMS Core triggers each
 //     via its own PPMS_REQUEST_* message (e.g. a button on the relevant
@@ -44,6 +48,7 @@ import { ActionBar } from "@/components/ActionBar";
 import { CAPABILITY_CONFIG } from "@/capabilities";
 import { MAX_TOKEN_LIFETIME_MS } from "@/lib/constants";
 import { decideDifferentialUpdate } from "@/lib/differential-update";
+import { decidePlanGuidanceUpdate } from "@/lib/plan-guidance-update";
 import { resolveOnDemandToken } from "@/lib/on-demand-token";
 import type { Capability, StreamState, CopilotGenerateState, SectionOutcome } from "@/types/client";
 
@@ -341,6 +346,7 @@ export default function CopilotApp() {
     sendExamGuidanceResult,
     refractiveGuidanceRequest,
     sendRefractiveGuidanceResult,
+    sendPlanGuidanceUpdate,
   } = usePostMessage();
   const { state, generate, regenerate, cancel } = useCopilotGenerate();
   const examGuidanceStream = useCopilotStream();
@@ -351,6 +357,7 @@ export default function CopilotApp() {
 
   const sessionStartedRef = useRef<number | null>(null);
   const differentialSentForRef = useRef<string | null>(null);
+  const planGuidanceSentForRef = useRef<string | null>(null);
   // Strict-Mode-safe guards, same pattern as sessionStartedRef/differentialSentForRef —
   // keyed on examGuidanceRequest.requestedAt so a double-invoked effect (dev
   // Strict Mode) doesn't fire a second AI call or send a duplicate result.
@@ -397,6 +404,17 @@ export default function CopilotApp() {
     differentialSentForRef.current = decision.requestId;
     sendDifferentialUpdate(session.visitId, decision.items);
   }, [state, session, sendDifferentialUpdate]);
+
+  // Notify PPMS Core once per successful generation (fresh fetch or
+  // Regenerate) so it can render a persistent Plan Guidance card outside
+  // this iframe. Same eager pattern and pure-decision-function shape as the
+  // differential-update effect above.
+  useEffect(() => {
+    const decision = decidePlanGuidanceUpdate(state, planGuidanceSentForRef.current);
+    if (!decision.send || !session) return;
+    planGuidanceSentForRef.current = decision.requestId;
+    sendPlanGuidanceUpdate(session.visitId, decision.result);
+  }, [state, session, sendPlanGuidanceUpdate]);
 
   // Trigger an on-demand EXAM_GUIDANCE generation when PPMS Core asks for one.
   // Separate request/hook from the consolidated flow above — no cacheKey, so

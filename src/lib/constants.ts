@@ -46,6 +46,15 @@ export const MSG_PPMS_REQUEST_REFRACTIVE_GUIDANCE = "PPMS_REQUEST_REFRACTIVE_GUI
 // shared refractive-guidance card across the three sub-tabs above.
 export const MSG_PLUGIN_REFRACTIVE_GUIDANCE_RESULT = "PLUGIN_REFRACTIVE_GUIDANCE_RESULT" as const;
 
+// Sent once per successful consolidated generation (and again after
+// Regenerate) once planGuidance validates successfully — same eager pattern
+// as MSG_PLUGIN_DIFFERENTIAL_UPDATE, since PLAN_GUIDANCE is part of the
+// consolidated call, not on-demand. Carries the structured result so PPMS
+// Core can render a persistent Plan Guidance card outside the plugin iframe.
+// Message type name and payload shape (`result`, not `sections`/`items`)
+// match PPMS Core's already-implemented receiver contract exactly.
+export const MSG_PLUGIN_PLAN_GUIDANCE_UPDATE = "PLUGIN_PLAN_GUIDANCE_UPDATE" as const;
+
 // API route paths (server-side only)
 export const COPILOT_STREAM_PATH = "/api/copilot/stream" as const;
 // Consolidated endpoint: one request → all six sections as structured JSON

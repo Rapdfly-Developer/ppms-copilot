@@ -25,6 +25,7 @@ import {
   MSG_PLUGIN_DIFFERENTIAL_UPDATE,
   MSG_PLUGIN_EXAM_GUIDANCE_RESULT,
   MSG_PLUGIN_REFRACTIVE_GUIDANCE_RESULT,
+  MSG_PLUGIN_PLAN_GUIDANCE_UPDATE,
 } from "@/lib/constants";
 import {
   validatePpmsInitMessage,
@@ -36,12 +37,14 @@ import type {
   DifferentialDiagnosisItem,
   ExamGuidanceSection,
   RefractiveGuidanceResult,
+  PlanGuidanceResult,
 } from "@/types/client";
 import type {
   PluginDraftConfirmedMessage,
   PluginDifferentialUpdateMessage,
   PluginExamGuidanceResultMessage,
   PluginRefractiveGuidanceResultMessage,
+  PluginPlanGuidanceUpdateMessage,
 } from "@/postmessage/types";
 
 // Resolved at module load time — the value is embedded by Next.js at build time
@@ -85,6 +88,7 @@ export interface UsePostMessageReturn {
   sendExamGuidanceResult: (visitId: string, result: ExamGuidanceResult) => void;
   refractiveGuidanceRequest: RefractiveGuidanceRequest | null;
   sendRefractiveGuidanceResult: (visitId: string, result: RefractiveGuidanceOutcome) => void;
+  sendPlanGuidanceUpdate: (visitId: string, result: PlanGuidanceResult) => void;
 }
 
 export function usePostMessage(): UsePostMessageReturn {
@@ -297,6 +301,21 @@ export function usePostMessage(): UsePostMessageReturn {
     [],
   );
 
+  // Token is NOT included — same posture as sendDifferentialUpdate. Sent once
+  // per successful consolidated generation (and again after Regenerate) once
+  // planGuidance validates successfully. Message type and payload shape
+  // (`result`, not `sections`/`items`) match PPMS Core's already-implemented
+  // receiver contract exactly.
+  const sendPlanGuidanceUpdate = useCallback((visitId: string, result: PlanGuidanceResult) => {
+    const msg: PluginPlanGuidanceUpdateMessage = {
+      type: MSG_PLUGIN_PLAN_GUIDANCE_UPDATE,
+      pluginId: PLUGIN_ID,
+      visitId,
+      result,
+    };
+    postToParent(msg);
+  }, []);
+
   return {
     session,
     confirmDraft,
@@ -309,5 +328,6 @@ export function usePostMessage(): UsePostMessageReturn {
     sendExamGuidanceResult,
     refractiveGuidanceRequest,
     sendRefractiveGuidanceResult,
+    sendPlanGuidanceUpdate,
   };
 }

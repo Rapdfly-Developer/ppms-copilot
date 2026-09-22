@@ -19,11 +19,13 @@ import {
   MSG_PLUGIN_DIFFERENTIAL_UPDATE,
   MSG_PLUGIN_EXAM_GUIDANCE_RESULT,
   MSG_PLUGIN_REFRACTIVE_GUIDANCE_RESULT,
+  MSG_PLUGIN_PLAN_GUIDANCE_UPDATE,
 } from "@/lib/constants";
 import type {
   DifferentialDiagnosisItem,
   ExamGuidanceSection,
   RefractiveGuidanceResult,
+  PlanGuidanceResult,
 } from "@/types/client";
 
 // ── Inbound: messages PPMS Core sends TO the Copilot ─────────────────────────
@@ -159,6 +161,20 @@ export type PluginRefractiveGuidanceResultMessage =
       errorMessage: string;
     };
 
+// Sent once per successful consolidated generation (and again after
+// Regenerate) once planGuidance validates successfully — never on a
+// validation failure. Same no-token, no-PHI-beyond-what's-already-sent
+// posture as PluginDifferentialUpdateMessage. Message type name and payload
+// shape match PPMS Core's already-implemented receiver contract exactly:
+// `result` (not `sections`/`items`), holding the same PlanGuidanceResult
+// shape validatePlanGuidance() produces server-side.
+export type PluginPlanGuidanceUpdateMessage = {
+  type: typeof MSG_PLUGIN_PLAN_GUIDANCE_UPDATE;
+  pluginId: typeof PLUGIN_ID;
+  visitId: string;
+  result: PlanGuidanceResult;
+};
+
 export type OutboundPluginMessage =
   | PluginReadyMessage
   | PluginDraftConfirmedMessage
@@ -166,4 +182,5 @@ export type OutboundPluginMessage =
   | PluginCloseMessage
   | PluginDifferentialUpdateMessage
   | PluginExamGuidanceResultMessage
-  | PluginRefractiveGuidanceResultMessage;
+  | PluginRefractiveGuidanceResultMessage
+  | PluginPlanGuidanceUpdateMessage;
