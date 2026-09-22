@@ -368,7 +368,7 @@ export default function CopilotApp() {
   const { state, generate, regenerate, cancel } = useCopilotGenerate();
   const examGuidanceStream = useCopilotStream();
   const refractiveGuidanceStream = useCopilotStream();
-  const [activeCapability, setActiveCapability] = useState<Capability>("PATIENT_SNAPSHOT");
+  const [activeCapability, setActiveCapability] = useState<Capability>("TIMELINE_SUMMARY");
   const [draftText, setDraftText] = useState("");
   const [draftConfirmed, setDraftConfirmed] = useState(false);
 
@@ -394,7 +394,7 @@ export default function CopilotApp() {
     sessionStartedRef.current = session.initiatedAt;
 
     // New visit → reset UI state, then generate all seven sections at once.
-    setActiveCapability("PATIENT_SNAPSHOT");
+    setActiveCapability("TIMELINE_SUMMARY");
     setDraftText("");
     setDraftConfirmed(false);
     generate(session.token, session.visitId);

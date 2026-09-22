@@ -3,22 +3,19 @@
 import type { Capability } from "@/types/client";
 import { CAPABILITY_CONFIG } from "@/capabilities";
 
+// Tabs visible inside the Copilot's own panel. Several capabilities
+// (Snapshot, Previous Visits, Follow-up, Differential Dx, Investigations,
+// Assessment, Plan Guidance, Investigation Guidance, Diagnosis Comparison,
+// Last Visit) are intentionally NOT listed here — their output is still
+// generated every visit (see SECTION_CAPABILITIES in copilot-generate.ts)
+// and pushed out via postMessage to cards on other PPMS Core EMR tabs; they
+// just have no clickable tab of their own inside this panel.
 const MVP_CAPABILITIES: Capability[] = [
-  "PATIENT_SNAPSHOT",
-  "PREVIOUS_VISIT_SUMMARY",
   "TIMELINE_SUMMARY",
   "IMPORTANT_CHANGES",
   "NOTE_ASSISTANCE",
-  "FOLLOW_UP_SUMMARY",
-  "DIFFERENTIAL_DIAGNOSIS",
   "MEDICATIONS_SUMMARY",
-  "INVESTIGATIONS_SUMMARY",
-  "ASSESSMENT_CONTEXT",
   "SUGGESTED_QUESTIONS",
-  "PLAN_GUIDANCE",
-  "INVESTIGATION_GUIDANCE",
-  "DIAGNOSIS_COMPARISON",
-  "LAST_VISIT_SUMMARY",
 ];
 
 // Short tab labels — kept concise for horizontal nav at narrow widths.
