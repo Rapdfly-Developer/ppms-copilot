@@ -15,6 +15,7 @@ const MVP_CAPABILITIES: Capability[] = [
   "INVESTIGATIONS_SUMMARY",
   "ASSESSMENT_CONTEXT",
   "SUGGESTED_QUESTIONS",
+  "PLAN_GUIDANCE",
 ];
 
 // Short tab labels — kept concise for horizontal nav at narrow widths.
@@ -30,6 +31,7 @@ const TAB_LABELS: Partial<Record<Capability, string>> = {
   INVESTIGATIONS_SUMMARY: "Investigations",
   ASSESSMENT_CONTEXT:     "Assessment",
   SUGGESTED_QUESTIONS:    "Doc Gaps",
+  PLAN_GUIDANCE:          "Plan Guidance",
 };
 
 interface CapabilitySelectorProps {

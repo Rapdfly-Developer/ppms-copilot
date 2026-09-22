@@ -1,14 +1,18 @@
 // Consolidated Copilot generation service.
 //
 // Replaces independent per-capability requests with a single AI call that
-// generates all eleven sections (snapshot, previousVisits, timeline,
+// generates all twelve sections (snapshot, previousVisits, timeline,
 // attention, draftNote, followUp, differentialDiagnosis, medications,
-// investigations, assessmentContext, suggestedQuestions) as a structured JSON
-// response — so opening a visit costs exactly one AI call. EXAM_GUIDANCE is
-// NOT part of this bundle — it's on-demand only, triggered from PPMS Core via
-// its own /api/copilot/stream request (see CopilotApp.tsx's second
-// useCopilotStream instance), since the General tab it correlates from is
-// often empty at visit-open.
+// investigations, assessmentContext, suggestedQuestions, planGuidance) as a
+// structured JSON response — so opening a visit costs exactly one AI call.
+// EXAM_GUIDANCE and REFRACTIVE_GUIDANCE are NOT part of this bundle — both
+// are on-demand only, triggered from PPMS Core via their own
+// /api/copilot/stream requests (see CopilotApp.tsx's dedicated
+// useCopilotStream instances), since their source tabs are often empty at
+// visit-open. PLAN_GUIDANCE IS part of this bundle — its inputs (diagnoses,
+// medications, pre-computed CLINICAL EVIDENCE deltas) are already fetched
+// for the other 11 sections regardless, so there's no equivalent
+// empty-at-visit-open risk.
 //
 // Security invariants:
 //   - patientRef and visitId come from the decoded token ONLY — never from body.
@@ -72,6 +76,7 @@ const SECTION_CAPABILITIES: Record<keyof CopilotData, Capability> = {
   investigations: "INVESTIGATIONS_SUMMARY",
   assessmentContext: "ASSESSMENT_CONTEXT",
   suggestedQuestions: "SUGGESTED_QUESTIONS",
+  planGuidance: "PLAN_GUIDANCE",
 };
 
 const SECTION_KEYS = Object.keys(SECTION_CAPABILITIES) as Array<keyof CopilotData>;
@@ -174,17 +179,20 @@ export async function generateCopilot(
     const result = await provider.complete({
       systemPrompt,
       messages: [{ role: "user", content: userMessage }],
-      // 10000: was 6000, which proved too tight for openai/gpt-oss-120b — live
-      // testing produced a Groq-side "Failed to generate JSON" error at that
-      // cap (the model overran it and the response was cut off mid-JSON,
-      // making the whole thing unparseable). Sized with real headroom above
-      // the pre-consolidation per-capability sum (700+1000+1200+1400+1400+
-      // 1400+1400 = 8500, tuned for the old, less verbose Llama defaults) to
-      // absorb this model's more verbose style. A truncated JSON response
-      // fails to parse for ALL sections, not just whichever key comes last,
-      // so this budget needs to comfortably cover genuine worst-case
-      // richness, not just the typical case.
-      maxTokens: 10000,
+      // 11000: was 10000, bumped for PLAN_GUIDANCE joining as the 12th
+      // section (own per-capability budget: 1400, matched to EXAM_GUIDANCE's).
+      // A truncated JSON response fails to parse for ALL sections, not just
+      // whichever key comes last, so every section added here must also grow
+      // this shared cap — provisional, live-test before treating as final.
+      //
+      // 10000 (prior value): was 6000, which proved too tight for
+      // openai/gpt-oss-120b — live testing produced a Groq-side "Failed to
+      // generate JSON" error at that cap (the model overran it and the
+      // response was cut off mid-JSON, making the whole thing unparseable).
+      // Sized with real headroom above the pre-consolidation per-capability
+      // sum (700+1000+1200+1400+1400+1400+1400 = 8500, tuned for the old,
+      // less verbose Llama defaults) to absorb this model's more verbose style.
+      maxTokens: 11000,
       reasoningEffort: "high",
       modelOverride: model,
       responseFormat: "json_object",
@@ -254,7 +262,11 @@ export async function generateCopilot(
       continue;
     }
 
-    const validation = validateResponse(raw, capability, doneMeta?.stopReason);
+    // groundTruth.matchedScheme is only read by PLAN_GUIDANCE's validator —
+    // harmless to pass for every other capability, which ignores it.
+    const validation = validateResponse(raw, capability, doneMeta?.stopReason, {
+      matchedScheme: context.matchedGovtScheme,
+    });
     if (!validation.ok) {
       sections[key] = errorSection(validation.code);
       sectionResults[key] = `validation_failed:${validation.code}`;
@@ -273,6 +285,9 @@ export async function generateCopilot(
         warnings: validation.warnings,
         ...(validation.differentialDiagnosisItems
           ? { differentialDiagnosisItems: validation.differentialDiagnosisItems }
+          : {}),
+        ...(validation.planGuidanceResult
+          ? { planGuidanceResult: validation.planGuidanceResult }
           : {}),
       };
       sectionResults[key] = validation.warnings.length > 0 ? "ok_with_warnings" : "ok";
@@ -303,6 +318,7 @@ export async function generateCopilot(
     investigations: sections.investigations ?? errorSection("INTERNAL_ERROR"),
     assessmentContext: sections.assessmentContext ?? errorSection("INTERNAL_ERROR"),
     suggestedQuestions: sections.suggestedQuestions ?? errorSection("INTERNAL_ERROR"),
+    planGuidance: sections.planGuidance ?? errorSection("INTERNAL_ERROR"),
   };
 
   const meta: GenerateMeta = {

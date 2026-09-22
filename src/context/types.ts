@@ -1,5 +1,6 @@
 import type { Capability } from "@/capabilities";
 import type { PatientDTO, VisitDTO, AppointmentDTO, TimelineEventDTO, DocumentedFlags } from "@/lib/ppms-client";
+import type { GovtSchemeEntry } from "@/lib/govt-schemes";
 
 // Raw data fetched from PPMS Core APIs before context building
 export type FetchedContext = {
@@ -29,6 +30,13 @@ export type PatientContext = {
   // check the model's claims against this original data, not against a
   // rendering of it the model already saw.
   documented?: DocumentedFlags;
+  // Ground truth for PLAN_GUIDANCE's Govt Scheme citation — the single
+  // GovtSchemeEntry matchGovtScheme() found for the current visit's
+  // documented diagnoses, or undefined if none matched. Same "validator
+  // checks the original data, not a rendering of it" principle as `documented`
+  // above — validatePlanGuidance rejects any citation that doesn't verbatim
+  // match this entry, and requires the section be absent when this is undefined.
+  matchedGovtScheme?: GovtSchemeEntry;
   // Deliberately no patientRef, patientId, or name — those stay in the token
 };
 

@@ -21,8 +21,10 @@ import type {
   ExamGuidanceSection,
   RefractiveGuidanceResult,
   RefractiveEyeGuidance,
+  PlanGuidanceResult,
 } from "@/types/client";
 import type { DocumentedFlags } from "@/lib/ppms-client";
+import type { GovtSchemeEntry } from "@/lib/govt-schemes";
 
 // ── Pre-sanitiser ─────────────────────────────────────────────────────────────
 // Rewrites benign documentary phrases that incidentally match a forbidden
@@ -696,6 +698,207 @@ function validateRefractiveGuidance(
   return { ok: true, result: { eyes, routing } };
 }
 
+// ── PLAN_GUIDANCE structural + retrospective-only + govt-scheme requirements ──
+// Two required blocks (Documented Progression, Comforting Methods), always in
+// that order, plus an OPTIONAL third block (Govt Scheme). Its presence is
+// itself ground-truth-checked: it may appear ONLY when groundTruth.matchedScheme
+// was provided, and its four fields must then match that entry EXACTLY — the
+// model cites, it never composes. Omitting the block is always acceptable
+// (never a violation), matching the "fail closed, omit rather than guess"
+// rule this whole sub-feature exists to enforce.
+
+// Separate from IMPERATIVE_LANGUAGE_PATTERNS — this capability's Documented
+// Progression field is retrospective-only by design (it describes changes
+// that already happened, from the pre-computed CLINICAL EVIDENCE section),
+// so forward-looking treatment framing is a hard reject here even where it
+// wouldn't be flagged as a command. Deliberately not anchored to sentence
+// position, same reasoning as IMPERATIVE_LANGUAGE_PATTERNS above.
+const PROSPECTIVE_TREATMENT_PATTERNS: RegExp[] = [
+  /\bnext step\b/i,
+  /\bif\s+[\w\s]{0,30}\bfails?\b/i,
+  /\btry\b/i,
+  /\bconsider escalating\b/i,
+  /\bescalat(?:e|ing|ed)\s+to\b/i,
+  /\bmay be considered\b/i,
+  /\bshould be escalated\b/i,
+  /\bstep up to\b/i,
+  /\bcould (?:be )?(?:tried|attempted|added) next\b/i,
+  /\bif (?:no|insufficient) (?:response|improvement)\b/i,
+
+  // Round 2 — subtler hedged-prospective phrasing a real model reaches for
+  // just as naturally as the constructions above, found by re-checking this
+  // list against plausible model output rather than only the literal
+  // examples that seeded it originally.
+  /\bcould be considered\b/i,
+  /\bwould be considered\b/i,
+  /\bmay be warranted\b/i,
+  /\bcould be warranted\b/i,
+  /\bmay benefit from\b/i,
+  /\bwould benefit from (?:an? )?(?:additional|further|second)\b/i,
+  /\bsecond[- ]line option\b/i,
+  /\ba reasonable next\b/i,
+  /\bfurther options?\s+(?:include|would include|may include)\b/i,
+  /\bmay require (?:escalation|an? additional|further)\b/i,
+  /\bmay need (?:escalation|an? additional|further)\b/i,
+  /\bwarrants?\s+(?:consideration|escalation)\b/i,
+  /\bshould\s+\w+(?:\s+\w+){0,4}\s+prove\s+(?:inadequate|insufficient|ineffective)\b/i,
+  /\bif\s+(?:unresponsive|refractory)\s+to\b/i,
+  /\bif\s+(?:uncontrolled|poorly controlled|inadequately controlled)\b/i,
+  /\ban? additional agent\s+(?:may|could|would)\b/i,
+  /\bcould\s+(?:progress|escalate)\s+to\b/i,
+];
+
+// Finds each label's line (in order, each after the previous), then joins
+// that field's value from its label line through the line before the next
+// label (or end of the segment for the last label) — same wrap-tolerant
+// forward-scan reasoning as parseExamGuidanceBlock/parseRefractiveEyeBlock
+// above, generalised to an arbitrary ordered label list.
+function parseLabeledFields(lines: string[], labels: string[]): string[] | null {
+  const indices: number[] = [];
+  let searchFrom = 0;
+  for (const label of labels) {
+    const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const pattern = new RegExp(`^${escaped}:`, "i");
+    const idx = lines.findIndex((l, i) => i >= searchFrom && pattern.test(l));
+    if (idx === -1) return null;
+    indices.push(idx);
+    searchFrom = idx + 1;
+  }
+
+  const values: string[] = [];
+  for (let i = 0; i < labels.length; i++) {
+    const start = indices[i];
+    const end = i + 1 < labels.length ? indices[i + 1] : lines.length;
+    const segment = lines.slice(start, end);
+    const escaped = labels[i].replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const firstMatch = segment[0].match(new RegExp(`^${escaped}:\\s*(.*)$`, "i"));
+    if (!firstMatch) return null;
+    const value = [firstMatch[1], ...segment.slice(1)].join(" ").trim();
+    if (!value) return null;
+    values.push(value);
+  }
+  return values;
+}
+
+function parsePlanHeaderBlock(block: string, expectedHeader: string, fieldLabels: string[]): string[] | null {
+  const lines = block.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
+  if (lines.length < 1 + fieldLabels.length) return null;
+
+  const headerMatch = lines[0].match(/^\[(.+)\]$/);
+  if (!headerMatch || headerMatch[1].trim() !== expectedHeader) return null;
+
+  return parseLabeledFields(lines.slice(1), fieldLabels);
+}
+
+const GOVT_SCHEME_FIELD_LABELS = ["Scheme", "Description", "Eligibility", "Last verified"];
+
+type PlanGuidanceValidation =
+  | { ok: true; result: PlanGuidanceResult }
+  | { ok: false; reason: string; code: string };
+
+function validatePlanGuidance(
+  sanitised: string,
+  matchedScheme: GovtSchemeEntry | undefined,
+): PlanGuidanceValidation {
+  for (const pattern of IMPERATIVE_LANGUAGE_PATTERNS) {
+    if (pattern.test(sanitised)) {
+      return {
+        ok: false,
+        reason: "Contains imperative/instructional language outside the permitted documentary framing",
+        code: "RESPONSE_UNSAFE",
+      };
+    }
+  }
+
+  for (const pattern of PROSPECTIVE_TREATMENT_PATTERNS) {
+    if (pattern.test(sanitised)) {
+      return {
+        ok: false,
+        reason: "Contains prospective/future-tense treatment-escalation language — this section must be retrospective only",
+        code: "RESPONSE_UNSAFE",
+      };
+    }
+  }
+
+  const rawBlocks = sanitised.trim().split(/\n\s*\n/).map((b) => b.trim()).filter(Boolean);
+  if (rawBlocks.length !== 2 && rawBlocks.length !== 3) {
+    return {
+      ok: false,
+      reason:
+        "Response must contain exactly 2 blocks (Documented Progression, Comforting Methods) " +
+        "or 3 when a Govt Scheme is cited, in that order",
+      code: "PLAN_GUIDANCE_STRUCTURE_INVALID",
+    };
+  }
+
+  const progressionFields = parsePlanHeaderBlock(rawBlocks[0], "Documented Progression", ["Progression"]);
+  if (!progressionFields) {
+    return {
+      ok: false,
+      reason: 'Block 1 does not match the required "[Documented Progression]" / Progression format',
+      code: "PLAN_GUIDANCE_STRUCTURE_INVALID",
+    };
+  }
+
+  const comfortingFields = parsePlanHeaderBlock(rawBlocks[1], "Comforting Methods", ["Guidance"]);
+  if (!comfortingFields) {
+    return {
+      ok: false,
+      reason: 'Block 2 does not match the required "[Comforting Methods]" / Guidance format',
+      code: "PLAN_GUIDANCE_STRUCTURE_INVALID",
+    };
+  }
+
+  let govtScheme: PlanGuidanceResult["govtScheme"];
+  if (rawBlocks.length === 3) {
+    // A Govt Scheme block is only ever valid when a match was actually given —
+    // its mere presence without a matchedScheme means the model fabricated
+    // one, which fails closed regardless of what it says.
+    if (!matchedScheme) {
+      return {
+        ok: false,
+        reason: "Response includes a Govt Scheme block, but no scheme was matched for this record",
+        code: "PLAN_GUIDANCE_STRUCTURE_INVALID",
+      };
+    }
+
+    const fields = parsePlanHeaderBlock(rawBlocks[2], "Govt Scheme", GOVT_SCHEME_FIELD_LABELS);
+    if (!fields) {
+      return {
+        ok: false,
+        reason: 'Block 3 does not match the required "[Govt Scheme]" / Scheme / Description / Eligibility / Last verified format',
+        code: "PLAN_GUIDANCE_STRUCTURE_INVALID",
+      };
+    }
+
+    const [schemeName, description, eligibilitySummary, lastVerified] = fields;
+    const matches =
+      schemeName === matchedScheme.schemeName &&
+      description === matchedScheme.description &&
+      eligibilitySummary === matchedScheme.eligibilitySummary &&
+      lastVerified === matchedScheme.lastVerified;
+
+    if (!matches) {
+      return {
+        ok: false,
+        reason: "Govt Scheme block does not exactly match the matched scheme's fields — citation must be verbatim",
+        code: "PLAN_GUIDANCE_STRUCTURE_INVALID",
+      };
+    }
+
+    govtScheme = { schemeName, description, eligibilitySummary, lastVerified };
+  }
+
+  return {
+    ok: true,
+    result: {
+      documentedProgression: progressionFields[0],
+      comfortingGuidance: comfortingFields[0],
+      ...(govtScheme ? { govtScheme } : {}),
+    },
+  };
+}
+
 export type ValidationResult =
   | {
       ok: true;
@@ -703,6 +906,7 @@ export type ValidationResult =
       differentialDiagnosisItems?: DifferentialDiagnosisItem[];
       examGuidanceSections?: ExamGuidanceSection[];
       refractiveGuidanceResult?: RefractiveGuidanceResult;
+      planGuidanceResult?: PlanGuidanceResult;
     }
   | { ok: false; reason: string; code: string };
 
@@ -710,7 +914,7 @@ export function validateResponse(
   text: string,
   capability: Capability,
   stopReason?: string,
-  groundTruth?: { documented?: DocumentedFlags },
+  groundTruth?: { documented?: DocumentedFlags; matchedScheme?: GovtSchemeEntry },
 ): ValidationResult {
   // 0. Pre-sanitise benign surface-pattern matches before hard checks
   const sanitised = sanitiseResponse(text);
@@ -786,6 +990,17 @@ export function validateResponse(
     refractiveGuidanceResult = result.result;
   }
 
+  // 4e. PLAN_GUIDANCE: retrospective progression + comforting guidance,
+  // plus an optional Govt Scheme block whose presence and content are
+  // cross-checked against groundTruth.matchedScheme. Eager/consolidated,
+  // unlike EXAM_GUIDANCE/REFRACTIVE_GUIDANCE.
+  let planGuidanceResult: PlanGuidanceResult | undefined;
+  if (capability === "PLAN_GUIDANCE") {
+    const result = validatePlanGuidance(sanitised, groundTruth?.matchedScheme);
+    if (!result.ok) return result;
+    planGuidanceResult = result.result;
+  }
+
   // 5. Warning patterns (soft — response allowed through with annotations)
   const warnings = WARNING_PATTERNS.filter(({ pattern }) => pattern.test(sanitised)).map(
     ({ warning }) => warning,
@@ -797,5 +1012,6 @@ export function validateResponse(
     ...(differentialDiagnosisItems ? { differentialDiagnosisItems } : {}),
     ...(examGuidanceSections ? { examGuidanceSections } : {}),
     ...(refractiveGuidanceResult ? { refractiveGuidanceResult } : {}),
+    ...(planGuidanceResult ? { planGuidanceResult } : {}),
   };
 }

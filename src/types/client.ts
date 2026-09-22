@@ -57,8 +57,36 @@ export type RefractiveGuidanceResult = {
   routing: RefractiveRoutingGuidance;
 };
 
+// Structured view of PLAN_GUIDANCE's result — the same blocks
+// validatePlanGuidance() already parsed, verified, and approved, not a
+// second independent parse. Unlike EXAM_GUIDANCE/REFRACTIVE_GUIDANCE this
+// capability IS part of the eager consolidated call — travels through
+// SectionOutcome.planGuidanceResult, same as differentialDiagnosisItems.
+//
+// `govtScheme` is present only when a confident match existed AND the
+// model's citation exactly matched it field-for-field — never a partial or
+// AI-composed entry. Its absence means "no confident match", not an error.
+export type GovtSchemeCitation = {
+  schemeName: string;
+  description: string;
+  eligibilitySummary: string;
+  lastVerified: string;
+};
+
+export type PlanGuidanceResult = {
+  documentedProgression: string;
+  comfortingGuidance: string;
+  govtScheme?: GovtSchemeCitation;
+};
+
 export type SectionOutcome =
-  | { ok: true; text: string; warnings: string[]; differentialDiagnosisItems?: DifferentialDiagnosisItem[] }
+  | {
+      ok: true;
+      text: string;
+      warnings: string[];
+      differentialDiagnosisItems?: DifferentialDiagnosisItem[];
+      planGuidanceResult?: PlanGuidanceResult;
+    }
   | { ok: false; errorCode: string; errorMessage: string };
 
 export type CopilotData = {
@@ -73,6 +101,7 @@ export type CopilotData = {
   investigations: SectionOutcome;
   assessmentContext: SectionOutcome;
   suggestedQuestions: SectionOutcome;
+  planGuidance: SectionOutcome;
 };
 
 export type CopilotGenerateState =
@@ -96,6 +125,7 @@ export type Capability =
   | "SUGGESTED_QUESTIONS"
   | "EXAM_GUIDANCE"
   | "REFRACTIVE_GUIDANCE"
+  | "PLAN_GUIDANCE"
   | "QUESTION";
 
 // Token stored only in memory — never in localStorage or cookies.

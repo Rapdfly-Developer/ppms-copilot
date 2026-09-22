@@ -17,6 +17,7 @@ export const CAPABILITIES = {
   SUGGESTED_QUESTIONS: "SUGGESTED_QUESTIONS",
   EXAM_GUIDANCE: "EXAM_GUIDANCE",
   REFRACTIVE_GUIDANCE: "REFRACTIVE_GUIDANCE",
+  PLAN_GUIDANCE: "PLAN_GUIDANCE",
   QUESTION: "QUESTION",
 } as const;
 
@@ -220,6 +221,26 @@ export const CAPABILITY_CONFIG: Record<Capability, CapabilityConfig> = {
     // routing block. Treat as provisional; adjust based on real Groq
     // behavior the same way EXAM_GUIDANCE's budget was tuned twice already.
     maxTokens: 1600,
+    permission: "ai.copilot.draft",
+    producesDraft: false,
+    reasoningEffort: "high",
+    modelTier: "reasoning",
+  },
+  PLAN_GUIDANCE: {
+    label: "Plan Guidance",
+    description:
+      "Correlates documented medication/diagnosis progression, patient-reassurance guidance, and (when a confident match exists) a cited government scheme for the Plan tab",
+    // Progression description needs visit history (for medicationDeltas/
+    // diagnosisDeltas); the govt scheme match only needs the current visit's
+    // documented diagnoses.
+    includes: { demographics: true, currentVisit: true, visitHistory: true, appointments: false, timeline: false },
+    visitLimit: 6,
+    // 1400: matched to EXAM_GUIDANCE's budget — two required free-text blocks
+    // (progression, comforting guidance) plus an optional but fully
+    // verbatim-dictated third block (govt scheme) that costs little since
+    // its content is copied, not composed. Provisional — live-test before
+    // treating as final, same as every other capability's budget so far.
+    maxTokens: 1400,
     permission: "ai.copilot.draft",
     producesDraft: false,
     reasoningEffort: "high",

@@ -33,6 +33,7 @@ import {
   type RefractionEye,
   type VisualAcuityEye,
 } from "@/lib/ppms-client";
+import { matchGovtScheme, type GovtSchemeEntry } from "@/lib/govt-schemes";
 import { toSafePatientSummary, estimateTokens } from "./pii";
 import {
   extractClinicalEvidence,
@@ -208,6 +209,10 @@ function renderVisit(visit: VisitDTO, label: string): string {
   if (visit.surgeryAdvised && visit.advisedSurgeryName) {
     lines.push(`Surgery advised: ${visit.advisedSurgeryName}`);
   }
+  if (visit.referralEnabled) {
+    lines.push(`Referral: documented${visit.referralNote ? ` — ${visit.referralNote}` : ""}`);
+  }
+  if (visit.dispenseSummary) lines.push(`Dispense summary: ${visit.dispenseSummary}`);
 
   return lines.join("\n");
 }
@@ -219,7 +224,7 @@ function renderVisit(visit: VisitDTO, label: string): string {
 function renderFetchedContext(
   fetched: FetchedContext,
   visitId: string,
-): { text: string; stats: PatientContext["stats"] } {
+): { text: string; stats: PatientContext["stats"]; matchedGovtScheme?: GovtSchemeEntry } {
   const safe = toSafePatientSummary(fetched.patient);
   const sections: string[] = [];
 
@@ -262,6 +267,25 @@ function renderFetchedContext(
     sections.push(`Refraction: ${d.refraction ? "Documented" : "Not documented"}`);
     sections.push(`Anterior Segment: ${d.anteriorSegment ? "Documented" : "Not documented"}`);
     sections.push(`Posterior Segment: ${d.posteriorSegment ? "Documented" : "Not documented"}`);
+  }
+
+  // ── APPLICABLE GOVT SCHEME (computed) ────────────────────────────────────
+  // Ground truth for PLAN_GUIDANCE's Govt Scheme block — matched deterministically
+  // in application code (matchGovtScheme), never by the model. Rendered here
+  // so the model can copy it verbatim; the validator (validatePlanGuidance)
+  // checks against the original GovtSchemeEntry object (threaded separately
+  // via PatientContext.matchedGovtScheme), never against this rendering.
+  // Absent entirely when no match was found — the prompt instructs the model
+  // to omit the Govt Scheme block whenever this section isn't present.
+  const matchedGovtScheme = fetched.currentVisit
+    ? matchGovtScheme(fetched.currentVisit.diagnoses)
+    : null;
+  if (matchedGovtScheme) {
+    sections.push("\n=== APPLICABLE GOVT SCHEME (computed — cite verbatim only) ===");
+    sections.push(`Scheme: ${matchedGovtScheme.schemeName}`);
+    sections.push(`Description: ${matchedGovtScheme.description}`);
+    sections.push(`Eligibility: ${matchedGovtScheme.eligibilitySummary}`);
+    sections.push(`Last verified: ${matchedGovtScheme.lastVerified}`);
   }
 
   // ── PREVIOUS VISITS ───────────────────────────────────────────────────────
@@ -336,7 +360,7 @@ function renderFetchedContext(
     estimatedTokens: estimateTokens(text),
   };
 
-  return { text, stats };
+  return { text, stats, matchedGovtScheme: matchedGovtScheme ?? undefined };
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -356,7 +380,7 @@ export async function buildPatientContext(
     throw err;
   }
 
-  const { text, stats } = renderFetchedContext(fetched, visitId);
+  const { text, stats, matchedGovtScheme } = renderFetchedContext(fetched, visitId);
 
   logger.info("context_built", {
     capability,
@@ -367,7 +391,7 @@ export async function buildPatientContext(
     estimatedTokens: stats.estimatedTokens,
   });
 
-  return { text, stats, visitId, documented: fetched.currentVisit?.documented };
+  return { text, stats, visitId, documented: fetched.currentVisit?.documented, matchedGovtScheme };
 }
 
 // Fetches the union of all MVP capabilities' data needs in one Promise.all,
@@ -405,7 +429,7 @@ export async function buildConsolidatedContext(args: {
     throw err;
   }
 
-  const { text, stats } = renderFetchedContext(fetched, visitId);
+  const { text, stats, matchedGovtScheme } = renderFetchedContext(fetched, visitId);
 
   logger.info("consolidated_context_built", {
     durationMs: Date.now() - start,
@@ -415,5 +439,5 @@ export async function buildConsolidatedContext(args: {
     estimatedTokens: stats.estimatedTokens,
   });
 
-  return { text, stats, visitId };
+  return { text, stats, visitId, documented: fetched.currentVisit?.documented, matchedGovtScheme };
 }

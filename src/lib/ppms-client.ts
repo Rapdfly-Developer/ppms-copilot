@@ -117,6 +117,12 @@ export type VisitDTO = {
   procedureName?: string;
   surgeryAdvised: boolean;
   advisedSurgeryName?: string;
+  // Plan tab's Disposition panel — same gap category as refraction/visualAcuity
+  // were before: not yet exposed by PPMS Core's gateway (plugin-framework/
+  // gateway/data.ts), so these will be undefined until that side adds them.
+  referralEnabled?: boolean;
+  referralNote?: string;
+  dispenseSummary?: string;
 };
 
 export type AppointmentDTO = {

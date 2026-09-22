@@ -48,7 +48,7 @@ import { resolveOnDemandToken } from "@/lib/on-demand-token";
 import type { Capability, StreamState, CopilotGenerateState, SectionOutcome } from "@/types/client";
 
 // ── Capability → section key mapping ─────────────────────────────────────────
-// Covers all 11 consolidated tabs.
+// Covers all 12 consolidated tabs.
 
 type SectionKey =
   | "snapshot"
@@ -61,7 +61,8 @@ type SectionKey =
   | "medications"
   | "investigations"
   | "assessmentContext"
-  | "suggestedQuestions";
+  | "suggestedQuestions"
+  | "planGuidance";
 
 const CAPABILITY_TO_SECTION: Partial<Record<Capability, SectionKey>> = {
   PATIENT_SNAPSHOT:       "snapshot",
@@ -75,6 +76,7 @@ const CAPABILITY_TO_SECTION: Partial<Record<Capability, SectionKey>> = {
   INVESTIGATIONS_SUMMARY: "investigations",
   ASSESSMENT_CONTEXT:     "assessmentContext",
   SUGGESTED_QUESTIONS:    "suggestedQuestions",
+  PLAN_GUIDANCE:          "planGuidance",
 };
 
 // Converts the consolidated state + active capability into the StreamState

@@ -29,6 +29,7 @@ function makeDoneState(overrides: {
     investigations: OK_SECTION("investigations"),
     assessmentContext: OK_SECTION("assessmentContext"),
     suggestedQuestions: OK_SECTION("suggestedQuestions"),
+    planGuidance: OK_SECTION("planGuidance"),
   };
 
   return {
