@@ -1,18 +1,37 @@
 // Consolidated Copilot generation service.
 //
 // Replaces independent per-capability requests with a single AI call that
-// generates all thirteen sections (snapshot, previousVisits, timeline,
+// generates thirteen sections (snapshot, previousVisits, timeline,
 // attention, draftNote, followUp, differentialDiagnosis, medications,
 // investigations, assessmentContext, suggestedQuestions, planGuidance,
-// investigationGuidance) as a structured JSON response — so opening a visit
-// costs exactly one AI call. EXAM_GUIDANCE and REFRACTIVE_GUIDANCE are NOT
-// part of this bundle — both are on-demand only, triggered from PPMS Core via
-// their own /api/copilot/stream requests (see CopilotApp.tsx's dedicated
+// investigationGuidance) as a structured JSON response, using the shared
+// high/reasoning tier. EXAM_GUIDANCE and REFRACTIVE_GUIDANCE are NOT part of
+// this bundle — both are on-demand only, triggered from PPMS Core via their
+// own /api/copilot/stream requests (see CopilotApp.tsx's dedicated
 // useCopilotStream instances), since their source tabs are often empty at
 // visit-open. PLAN_GUIDANCE and INVESTIGATION_GUIDANCE ARE part of this
 // bundle — their inputs (diagnoses, medications, pre-computed CLINICAL
 // EVIDENCE deltas, documented investigations) are already fetched for the
 // other sections regardless, so there's no equivalent empty-at-visit-open risk.
+//
+// DIAGNOSIS_COMPARISON and LAST_VISIT_SUMMARY are eager too, but are NOT part
+// of the single JSON bundle above — opening a visit costs the one bundled
+// call PLUS these two, issued in parallel via Promise.all immediately after.
+// They're split out because they must run at the fast/medium tier (an
+// explicit product decision — a narrow single-field judgment doesn't need
+// open-ended reasoning depth), and the bundle is one provider.complete() call
+// with one shared model/reasoningEffort for every key in it — there is no way
+// to give an individual JSON key its own tier within that single completion.
+// Each also gets its own narrower context text (current-visit-only for
+// DIAGNOSIS_COMPARISON, V1-only for LAST_VISIT_SUMMARY — see
+// context.diagnosisComparisonText/lastVisitText in context/builder.ts) rather
+// than the full shared context every bundled section reads from, so
+// LAST_VISIT_SUMMARY cannot see V0/older-visit data to leak by mistake, and
+// DIAGNOSIS_COMPARISON cannot see investigation results it isn't meant to
+// reason from. Net effect: this eager path costs 3 real AI calls per visit
+// open (1 bundle + 2 parallel), not 1 — a deliberate trade of the original
+// "exactly one call" design goal for per-field model-tier control and
+// stronger data isolation on these two fields specifically.
 //
 // Security invariants:
 //   - patientRef and visitId come from the decoded token ONLY — never from body.
