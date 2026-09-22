@@ -27,6 +27,11 @@
 //     validates successfully (see lib/plan-guidance-update.ts), same eager
 //     pattern as PLUGIN_DIFFERENTIAL_UPDATE — visitId + the structured
 //     PlanGuidanceResult only, no token.
+//   - PLUGIN_ASSESSMENT_UPDATE and PLUGIN_PATIENT_PROFILE_UPDATE are sent
+//     automatically alongside the above, same eager pattern — pure reuse of
+//     already-validated section text (assessmentContext; snapshot,
+//     previousVisits, timeline respectively), no new AI call, no new
+//     validator. See lib/assessment-update.ts and lib/patient-profile-update.ts.
 //   - EXAM_GUIDANCE and REFRACTIVE_GUIDANCE are SEPARATE, on-demand-only
 //     requests — not part of the consolidated call. PPMS Core triggers each
 //     via its own PPMS_REQUEST_* message (e.g. a button on the relevant
@@ -49,6 +54,9 @@ import { CAPABILITY_CONFIG } from "@/capabilities";
 import { MAX_TOKEN_LIFETIME_MS } from "@/lib/constants";
 import { decideDifferentialUpdate } from "@/lib/differential-update";
 import { decidePlanGuidanceUpdate } from "@/lib/plan-guidance-update";
+import { decideAssessmentUpdate } from "@/lib/assessment-update";
+import { decidePatientProfileUpdate } from "@/lib/patient-profile-update";
+import { decideInvestigationGuidanceUpdate } from "@/lib/investigation-guidance-update";
 import { resolveOnDemandToken } from "@/lib/on-demand-token";
 import type { Capability, StreamState, CopilotGenerateState, SectionOutcome } from "@/types/client";
 
@@ -67,7 +75,8 @@ type SectionKey =
   | "investigations"
   | "assessmentContext"
   | "suggestedQuestions"
-  | "planGuidance";
+  | "planGuidance"
+  | "investigationGuidance";
 
 const CAPABILITY_TO_SECTION: Partial<Record<Capability, SectionKey>> = {
   PATIENT_SNAPSHOT:       "snapshot",
@@ -82,6 +91,7 @@ const CAPABILITY_TO_SECTION: Partial<Record<Capability, SectionKey>> = {
   ASSESSMENT_CONTEXT:     "assessmentContext",
   SUGGESTED_QUESTIONS:    "suggestedQuestions",
   PLAN_GUIDANCE:          "planGuidance",
+  INVESTIGATION_GUIDANCE: "investigationGuidance",
 };
 
 // Converts the consolidated state + active capability into the StreamState
@@ -347,6 +357,9 @@ export default function CopilotApp() {
     refractiveGuidanceRequest,
     sendRefractiveGuidanceResult,
     sendPlanGuidanceUpdate,
+    sendAssessmentUpdate,
+    sendPatientProfileUpdate,
+    sendInvestigationGuidanceUpdate,
   } = usePostMessage();
   const { state, generate, regenerate, cancel } = useCopilotGenerate();
   const examGuidanceStream = useCopilotStream();
@@ -358,6 +371,9 @@ export default function CopilotApp() {
   const sessionStartedRef = useRef<number | null>(null);
   const differentialSentForRef = useRef<string | null>(null);
   const planGuidanceSentForRef = useRef<string | null>(null);
+  const assessmentSentForRef = useRef<string | null>(null);
+  const patientProfileSentForRef = useRef<string | null>(null);
+  const investigationGuidanceSentForRef = useRef<string | null>(null);
   // Strict-Mode-safe guards, same pattern as sessionStartedRef/differentialSentForRef —
   // keyed on examGuidanceRequest.requestedAt so a double-invoked effect (dev
   // Strict Mode) doesn't fire a second AI call or send a duplicate result.
@@ -415,6 +431,45 @@ export default function CopilotApp() {
     planGuidanceSentForRef.current = decision.requestId;
     sendPlanGuidanceUpdate(session.visitId, decision.result);
   }, [state, session, sendPlanGuidanceUpdate]);
+
+  // Notify PPMS Core once per successful generation so it can render a
+  // persistent Assessment card outside this iframe. Pure reuse of the
+  // already-validated assessmentContext text — no new AI call, no new
+  // validator. Same pure-decision-function shape as the effects above.
+  useEffect(() => {
+    const decision = decideAssessmentUpdate(state, assessmentSentForRef.current);
+    if (!decision.send || !session) return;
+    assessmentSentForRef.current = decision.requestId;
+    sendAssessmentUpdate(session.visitId, decision.assessmentContext);
+  }, [state, session, sendAssessmentUpdate]);
+
+  // Notify PPMS Core once per successful generation so it can render a
+  // persistent Patient Profile card (three sub-tabs on PPMS Core's side)
+  // outside this iframe. Pure reuse of the already-validated snapshot /
+  // previousVisits / timeline texts — no new AI call, no new validator.
+  useEffect(() => {
+    const decision = decidePatientProfileUpdate(state, patientProfileSentForRef.current);
+    if (!decision.send || !session) return;
+    patientProfileSentForRef.current = decision.requestId;
+    sendPatientProfileUpdate(session.visitId, {
+      ...(decision.patientSnapshot !== undefined ? { patientSnapshot: decision.patientSnapshot } : {}),
+      ...(decision.previousVisitSummary !== undefined
+        ? { previousVisitSummary: decision.previousVisitSummary }
+        : {}),
+      ...(decision.timelineSummary !== undefined ? { timelineSummary: decision.timelineSummary } : {}),
+    });
+  }, [state, session, sendPatientProfileUpdate]);
+
+  // Notify PPMS Core once per successful generation so it can render a
+  // persistent Investigation Guidance card outside this iframe. Same eager
+  // pattern and pure-decision-function shape as the differential/plan
+  // guidance effects above.
+  useEffect(() => {
+    const decision = decideInvestigationGuidanceUpdate(state, investigationGuidanceSentForRef.current);
+    if (!decision.send || !session) return;
+    investigationGuidanceSentForRef.current = decision.requestId;
+    sendInvestigationGuidanceUpdate(session.visitId, decision.result);
+  }, [state, session, sendInvestigationGuidanceUpdate]);
 
   // Trigger an on-demand EXAM_GUIDANCE generation when PPMS Core asks for one.
   // Separate request/hook from the consolidated flow above — no cacheKey, so

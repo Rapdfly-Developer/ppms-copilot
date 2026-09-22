@@ -1,18 +1,18 @@
 // Consolidated Copilot generation service.
 //
 // Replaces independent per-capability requests with a single AI call that
-// generates all twelve sections (snapshot, previousVisits, timeline,
+// generates all thirteen sections (snapshot, previousVisits, timeline,
 // attention, draftNote, followUp, differentialDiagnosis, medications,
-// investigations, assessmentContext, suggestedQuestions, planGuidance) as a
-// structured JSON response — so opening a visit costs exactly one AI call.
-// EXAM_GUIDANCE and REFRACTIVE_GUIDANCE are NOT part of this bundle — both
-// are on-demand only, triggered from PPMS Core via their own
-// /api/copilot/stream requests (see CopilotApp.tsx's dedicated
+// investigations, assessmentContext, suggestedQuestions, planGuidance,
+// investigationGuidance) as a structured JSON response — so opening a visit
+// costs exactly one AI call. EXAM_GUIDANCE and REFRACTIVE_GUIDANCE are NOT
+// part of this bundle — both are on-demand only, triggered from PPMS Core via
+// their own /api/copilot/stream requests (see CopilotApp.tsx's dedicated
 // useCopilotStream instances), since their source tabs are often empty at
-// visit-open. PLAN_GUIDANCE IS part of this bundle — its inputs (diagnoses,
-// medications, pre-computed CLINICAL EVIDENCE deltas) are already fetched
-// for the other 11 sections regardless, so there's no equivalent
-// empty-at-visit-open risk.
+// visit-open. PLAN_GUIDANCE and INVESTIGATION_GUIDANCE ARE part of this
+// bundle — their inputs (diagnoses, medications, pre-computed CLINICAL
+// EVIDENCE deltas, documented investigations) are already fetched for the
+// other sections regardless, so there's no equivalent empty-at-visit-open risk.
 //
 // Security invariants:
 //   - patientRef and visitId come from the decoded token ONLY — never from body.
@@ -77,6 +77,7 @@ const SECTION_CAPABILITIES: Record<keyof CopilotData, Capability> = {
   assessmentContext: "ASSESSMENT_CONTEXT",
   suggestedQuestions: "SUGGESTED_QUESTIONS",
   planGuidance: "PLAN_GUIDANCE",
+  investigationGuidance: "INVESTIGATION_GUIDANCE",
 };
 
 const SECTION_KEYS = Object.keys(SECTION_CAPABILITIES) as Array<keyof CopilotData>;
@@ -179,20 +180,25 @@ export async function generateCopilot(
     const result = await provider.complete({
       systemPrompt,
       messages: [{ role: "user", content: userMessage }],
-      // 11000: was 10000, bumped for PLAN_GUIDANCE joining as the 12th
-      // section (own per-capability budget: 1400, matched to EXAM_GUIDANCE's).
-      // A truncated JSON response fails to parse for ALL sections, not just
-      // whichever key comes last, so every section added here must also grow
-      // this shared cap — provisional, live-test before treating as final.
+      // 12800: was 11000, bumped for INVESTIGATION_GUIDANCE joining as the
+      // 13th section (own per-capability budget: 1800 — live-tested; 1400
+      // truncated on a real verbose response, see capabilities/index.ts). A
+      // truncated JSON response fails to parse for ALL sections, not just
+      // whichever key comes last, so every section added here must also
+      // grow this shared cap — provisional, live-test before treating as final.
       //
-      // 10000 (prior value): was 6000, which proved too tight for
+      // 11000 (prior value): was 10000, bumped for PLAN_GUIDANCE joining as
+      // the 12th section (own per-capability budget: 1400, matched to
+      // EXAM_GUIDANCE's).
+      //
+      // 10000 (value before that): was 6000, which proved too tight for
       // openai/gpt-oss-120b — live testing produced a Groq-side "Failed to
       // generate JSON" error at that cap (the model overran it and the
       // response was cut off mid-JSON, making the whole thing unparseable).
       // Sized with real headroom above the pre-consolidation per-capability
       // sum (700+1000+1200+1400+1400+1400+1400 = 8500, tuned for the old,
       // less verbose Llama defaults) to absorb this model's more verbose style.
-      maxTokens: 11000,
+      maxTokens: 12800,
       reasoningEffort: "high",
       modelOverride: model,
       responseFormat: "json_object",
@@ -289,6 +295,9 @@ export async function generateCopilot(
         ...(validation.planGuidanceResult
           ? { planGuidanceResult: validation.planGuidanceResult }
           : {}),
+        ...(validation.investigationGuidanceResult
+          ? { investigationGuidanceResult: validation.investigationGuidanceResult }
+          : {}),
       };
       sectionResults[key] = validation.warnings.length > 0 ? "ok_with_warnings" : "ok";
     }
@@ -309,6 +318,28 @@ export async function generateCopilot(
       planGuidanceResult: {
         ...planGuidanceSection.planGuidanceResult,
         followUpSummary: followUpSection.text,
+      },
+    };
+  }
+
+  // Thread the already-validated INVESTIGATIONS_SUMMARY text into
+  // investigationGuidance's result — same pure-reuse reasoning as
+  // followUpSummary above. No new AI call, no new validation. Absent (not
+  // an error) when investigations itself failed or was empty —
+  // investigationGuidance's own suggestedInvestigations list is entirely
+  // unaffected either way.
+  const investigationsSection = sections.investigations;
+  const investigationGuidanceSection = sections.investigationGuidance;
+  if (
+    investigationsSection?.ok &&
+    investigationGuidanceSection?.ok &&
+    investigationGuidanceSection.investigationGuidanceResult
+  ) {
+    sections.investigationGuidance = {
+      ...investigationGuidanceSection,
+      investigationGuidanceResult: {
+        ...investigationGuidanceSection.investigationGuidanceResult,
+        investigationsSummary: investigationsSection.text,
       },
     };
   }
@@ -338,6 +369,7 @@ export async function generateCopilot(
     assessmentContext: sections.assessmentContext ?? errorSection("INTERNAL_ERROR"),
     suggestedQuestions: sections.suggestedQuestions ?? errorSection("INTERNAL_ERROR"),
     planGuidance: sections.planGuidance ?? errorSection("INTERNAL_ERROR"),
+    investigationGuidance: sections.investigationGuidance ?? errorSection("INTERNAL_ERROR"),
   };
 
   const meta: GenerateMeta = {

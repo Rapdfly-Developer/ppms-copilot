@@ -18,6 +18,7 @@ export const CAPABILITIES = {
   EXAM_GUIDANCE: "EXAM_GUIDANCE",
   REFRACTIVE_GUIDANCE: "REFRACTIVE_GUIDANCE",
   PLAN_GUIDANCE: "PLAN_GUIDANCE",
+  INVESTIGATION_GUIDANCE: "INVESTIGATION_GUIDANCE",
   QUESTION: "QUESTION",
 } as const;
 
@@ -241,6 +242,29 @@ export const CAPABILITY_CONFIG: Record<Capability, CapabilityConfig> = {
     // its content is copied, not composed. Provisional — live-test before
     // treating as final, same as every other capability's budget so far.
     maxTokens: 1400,
+    permission: "ai.copilot.draft",
+    producesDraft: false,
+    reasoningEffort: "high",
+    modelTier: "reasoning",
+  },
+  INVESTIGATION_GUIDANCE: {
+    label: "Investigation Guidance",
+    description:
+      "Correlates documented findings into investigations commonly associated with the clinical picture, for the Investigations tab",
+    // Needs visit history: previous investigations (to avoid suggesting a
+    // duplicate) and diagnosis/history context, same reasoning as
+    // DIFFERENTIAL_DIAGNOSIS's config.
+    includes: { demographics: true, currentVisit: true, visitHistory: true, appointments: false, timeline: false },
+    visitLimit: 3,
+    // 1800: was 1400 (matched to DIFFERENTIAL_DIAGNOSIS's budget), bumped
+    // after live-testing against the real Groq API showed 1400 was too
+    // tight for a genuinely verbose response — one real call (AMD/central
+    // vision distortion scenario, 5 correlated suggestions) hit max_tokens
+    // and was truncated mid-response. Unlike Differential Diagnosis's short
+    // one-line reasons, each suggestion here carries a longer correlative
+    // rationale sentence by design, so more items overruns the shared
+    // budget faster. Matched to REFRACTIVE_GUIDANCE's provisional estimate.
+    maxTokens: 1800,
     permission: "ai.copilot.draft",
     producesDraft: false,
     reasoningEffort: "high",

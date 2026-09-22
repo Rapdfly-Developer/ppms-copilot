@@ -37,6 +37,7 @@ function makeDoneState(overrides: {
           ...(overrides.missingResult ? {} : { planGuidanceResult: overrides.result }),
         }
       : { ok: false, errorCode: "PLAN_GUIDANCE_STRUCTURE_INVALID", errorMessage: "bad format" },
+    investigationGuidance: OK_SECTION("investigationGuidance"),
   };
 
   return {

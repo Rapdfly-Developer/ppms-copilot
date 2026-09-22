@@ -22,6 +22,8 @@ import type {
   RefractiveGuidanceResult,
   RefractiveEyeGuidance,
   PlanGuidanceResult,
+  InvestigationGuidanceResult,
+  SuggestedInvestigationItem,
 } from "@/types/client";
 import type { DocumentedFlags } from "@/lib/ppms-client";
 import type { GovtSchemeEntry } from "@/lib/govt-schemes";
@@ -899,6 +901,200 @@ function validatePlanGuidance(
   };
 }
 
+// ── INVESTIGATION_GUIDANCE correlative-only + structural requirements ────────
+// Structurally closest to DIFFERENTIAL_DIAGNOSIS's variable-length,
+// confidence-graded block list — not to PLAN_GUIDANCE's fixed block count,
+// since there's no equivalent "retrospective only" boundary here (suggesting
+// an investigation not yet in the record is inherently prospective; there is
+// nothing to be retrospective about). The guardrail instead is correlative
+// framing: never an instruction, and never a non-imperative but still
+// directive/requirement construction (DIRECTIVE_LANGUAGE_PATTERNS, below).
+
+// Deliberately NOT the shared IMPERATIVE_LANGUAGE_PATTERNS — found via this
+// capability's own test suite, not by inspection: the shared list bans
+// "Assess," "Evaluate," "Screen for," "Test for," and "Investigate" anywhere
+// in the text, which is safe for EXAM_GUIDANCE/REFRACTIVE_GUIDANCE/
+// PLAN_GUIDANCE (none of them ever need to say what a test is FOR), but
+// breaks this capability outright — its entire correlative premise is
+// describing an investigation's purpose ("commonly used to assess X",
+// per the prompt's own required example), so those five verbs appear
+// constantly in legitimate, non-directive output. "Check," "Examine," "Look
+// for," "Rule out," and "Order" have no such legitimate purpose-description
+// use here and stay banned unchanged.
+const INVESTIGATION_GUIDANCE_IMPERATIVE_PATTERNS: RegExp[] = [
+  /\bCheck\b/i,
+  /\bExamine\b/i,
+  /\bLook for\b/i,
+  /\bRule out\b/i,
+  /\bPerform\b/i,
+  /\bOrder\b/i,
+];
+
+// Separate from IMPERATIVE_LANGUAGE_PATTERNS — these are directive/
+// requirement constructions that never read as a command verb ("Order X")
+// but still tell the doctor an investigation is needed, which this
+// capability's correlative-only framing forbids just as much. Deliberately
+// NOT anchored to sentence position, same reasoning as
+// IMPERATIVE_LANGUAGE_PATTERNS/PROSPECTIVE_TREATMENT_PATTERNS above.
+//
+// "should be considered" / "could be considered" are deliberately NOT
+// included here — live-tested separately as a possible soft-directive escape
+// hatch around the patterns below before deciding whether they need their
+// own entry (same "am I only testing what I wrote" discipline PLAN_GUIDANCE's
+// PROSPECTIVE_TREATMENT_PATTERNS list went through).
+const DIRECTIVE_LANGUAGE_PATTERNS: RegExp[] = [
+  /\bshould undergo\b/i,
+  /\bneeds?\b/i,
+  /\brequires?\b/i,
+  /\bmust be (?:ordered|obtained|performed|scheduled|done)\b/i,
+
+  // Round 2 — other directive constructions a model reaches for just as
+  // naturally, found by checking this list against plausible phrasing rather
+  // than only the four literal examples that seeded it.
+  /\bshould be (?:ordered|obtained|performed|scheduled|done|pursued|arranged|sent)\b/i,
+  /\bis (?:indicated|warranted|necessary)\b/i,
+  /\bwould be (?:indicated|warranted|advisable|necessary)\b/i,
+  /\bwarrants?\b/i,
+  /\brecommend(?:ed|s|ing)?\b/i,
+  /\badvised\b/i,
+  /\bought to (?:be|undergo)\b/i,
+];
+
+const INVESTIGATION_GUIDANCE_NO_SUGGESTION_SENTENCE =
+  "No additional investigations are suggested based on the documented record at this time.";
+
+// Same leading-heading tolerance as extractConsiderationsSection above — this
+// text is embedded as one JSON string value alongside sections that DO use
+// "##" headers, so a model can pick up that habit here too even though the
+// prompt doesn't ask for one. No trailing-boundary logic is needed (unlike
+// Differential Diagnosis's Documentation Gaps section) since nothing follows
+// the suggestion list within this key's string.
+function extractSuggestionsSection(text: string): string {
+  const leadingHeadingMatch = text.match(/^##[^\n]*\n/);
+  return leadingHeadingMatch ? text.slice(leadingHeadingMatch[0].length).trim() : text.trim();
+}
+
+// Parses one suggestion block against the exact field order the prompt
+// specifies: bold name line, rationale line(s), "Confidence: Low|Moderate"
+// line, and an optional "Source: ..." line. Same wrap-tolerant forward-scan
+// as parseConsiderationBlock above, but — unlike DifferentialDiagnosisItem —
+// the rationale text is kept, not discarded, since it's the substance of
+// what this capability surfaces, not just a compact badge.
+function parseSuggestionBlock(block: string): SuggestedInvestigationItem | null {
+  const lines = block.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
+  if (lines.length < 3) return null;
+
+  const nameMatch = lines[0].match(/^\*\*(.+)\*\*$/);
+  if (!nameMatch || !nameMatch[1].trim()) return null;
+
+  const confidenceIndex = lines.findIndex(
+    (l, idx) => idx >= 1 && /^Confidence:\s*(Low|Moderate)\s*$/i.test(l),
+  );
+  if (confidenceIndex === -1) return null;
+
+  const rationaleLines = lines.slice(1, confidenceIndex);
+  if (rationaleLines.length === 0) return null;
+  if (rationaleLines.some((l) => /^Confidence:/i.test(l) || /^Source:/i.test(l))) return null;
+
+  const confidenceMatch = lines[confidenceIndex].match(/^Confidence:\s*(Low|Moderate)\s*$/i)!;
+  const confidence: "Low" | "Moderate" =
+    confidenceMatch[1].toLowerCase() === "low" ? "Low" : "Moderate";
+
+  const trailing = lines.slice(confidenceIndex + 1);
+  if (trailing.length > 1) return null;
+  let source: string | undefined;
+  if (trailing.length === 1) {
+    const sourceMatch = trailing[0].match(/^Source:\s*(.+)$/i);
+    if (!sourceMatch || !sourceMatch[1].trim()) return null;
+    source = sourceMatch[1].trim();
+  }
+
+  return {
+    name: nameMatch[1].trim(),
+    rationale: rationaleLines.join(" ").trim(),
+    confidence,
+    ...(source ? { source } : {}),
+  };
+}
+
+type InvestigationGuidanceValidation =
+  | { ok: true; result: InvestigationGuidanceResult }
+  | { ok: false; reason: string; code: string };
+
+function validateInvestigationGuidance(sanitised: string): InvestigationGuidanceValidation {
+  for (const pattern of INVESTIGATION_GUIDANCE_IMPERATIVE_PATTERNS) {
+    if (pattern.test(sanitised)) {
+      return {
+        ok: false,
+        reason: "Contains imperative/instructional language outside the permitted correlative framing",
+        code: "RESPONSE_UNSAFE",
+      };
+    }
+  }
+
+  for (const pattern of DIRECTIVE_LANGUAGE_PATTERNS) {
+    if (pattern.test(sanitised)) {
+      return {
+        ok: false,
+        reason: "Contains directive or requirement language — investigation suggestions must be correlative only",
+        code: "RESPONSE_UNSAFE",
+      };
+    }
+  }
+
+  const section = extractSuggestionsSection(sanitised);
+  const rawBlocks = section.split(/\n\s*\n/).map((b) => b.trim()).filter(Boolean);
+
+  if (rawBlocks.length === 0) {
+    return {
+      ok: false,
+      reason: "Response contains no investigation suggestions and no fixed no-suggestion sentence",
+      code: "INVESTIGATION_GUIDANCE_STRUCTURE_INVALID",
+    };
+  }
+
+  // Zero-item case: only acceptable if the entire section is exactly the
+  // fixed no-suggestion sentence — nothing else alongside it. Same
+  // "fail closed" reasoning as validateDifferentialDiagnosis's zero-item case.
+  if (rawBlocks.length === 1 && rawBlocks[0] === INVESTIGATION_GUIDANCE_NO_SUGGESTION_SENTENCE) {
+    return { ok: true, result: { suggestedInvestigations: [] } };
+  }
+
+  // Merge orphaned tail fragments caused by a blank line within a block —
+  // same reasoning as validateDifferentialDiagnosis above.
+  const blocks: string[] = [];
+  for (const raw of rawBlocks) {
+    const firstLine = raw.split("\n")[0].trim();
+    const isOrphanedTail =
+      /^Confidence:\s*(Low|Moderate)/i.test(firstLine) || /^Source:\s/i.test(firstLine);
+    if (isOrphanedTail && blocks.length > 0) {
+      blocks[blocks.length - 1] += "\n" + raw;
+    } else {
+      blocks.push(raw);
+    }
+  }
+
+  const suggestedInvestigations: SuggestedInvestigationItem[] = [];
+  for (const block of blocks) {
+    const parsed = parseSuggestionBlock(block);
+    if (!parsed) {
+      return {
+        ok: false,
+        reason:
+          "Response contains a suggestion block that does not match the required " +
+          "name / rationale / confidence format",
+        code: "INVESTIGATION_GUIDANCE_STRUCTURE_INVALID",
+      };
+    }
+    suggestedInvestigations.push(parsed);
+  }
+
+  // investigationsSummary is deliberately left unset here — it's threaded
+  // post-hoc in service/copilot-generate.ts from the already-validated
+  // INVESTIGATIONS_SUMMARY section, same pattern as PlanGuidanceResult.followUpSummary.
+  return { ok: true, result: { suggestedInvestigations } };
+}
+
 export type ValidationResult =
   | {
       ok: true;
@@ -907,6 +1103,7 @@ export type ValidationResult =
       examGuidanceSections?: ExamGuidanceSection[];
       refractiveGuidanceResult?: RefractiveGuidanceResult;
       planGuidanceResult?: PlanGuidanceResult;
+      investigationGuidanceResult?: InvestigationGuidanceResult;
     }
   | { ok: false; reason: string; code: string };
 
@@ -1001,6 +1198,17 @@ export function validateResponse(
     planGuidanceResult = result.result;
   }
 
+  // 4f. INVESTIGATION_GUIDANCE: variable-length, confidence-graded list of
+  // correlative investigation suggestions — structurally closest to
+  // DIFFERENTIAL_DIAGNOSIS, not to PLAN_GUIDANCE's fixed block count.
+  // Eager/consolidated, same reasoning as PLAN_GUIDANCE.
+  let investigationGuidanceResult: InvestigationGuidanceResult | undefined;
+  if (capability === "INVESTIGATION_GUIDANCE") {
+    const result = validateInvestigationGuidance(sanitised);
+    if (!result.ok) return result;
+    investigationGuidanceResult = result.result;
+  }
+
   // 5. Warning patterns (soft — response allowed through with annotations)
   const warnings = WARNING_PATTERNS.filter(({ pattern }) => pattern.test(sanitised)).map(
     ({ warning }) => warning,
@@ -1013,5 +1221,6 @@ export function validateResponse(
     ...(examGuidanceSections ? { examGuidanceSections } : {}),
     ...(refractiveGuidanceResult ? { refractiveGuidanceResult } : {}),
     ...(planGuidanceResult ? { planGuidanceResult } : {}),
+    ...(investigationGuidanceResult ? { investigationGuidanceResult } : {}),
   };
 }

@@ -26,6 +26,9 @@ import {
   MSG_PLUGIN_EXAM_GUIDANCE_RESULT,
   MSG_PLUGIN_REFRACTIVE_GUIDANCE_RESULT,
   MSG_PLUGIN_PLAN_GUIDANCE_UPDATE,
+  MSG_PLUGIN_ASSESSMENT_UPDATE,
+  MSG_PLUGIN_PATIENT_PROFILE_UPDATE,
+  MSG_PLUGIN_INVESTIGATION_GUIDANCE_UPDATE,
 } from "@/lib/constants";
 import {
   validatePpmsInitMessage,
@@ -38,6 +41,7 @@ import type {
   ExamGuidanceSection,
   RefractiveGuidanceResult,
   PlanGuidanceResult,
+  InvestigationGuidanceResult,
 } from "@/types/client";
 import type {
   PluginDraftConfirmedMessage,
@@ -45,6 +49,9 @@ import type {
   PluginExamGuidanceResultMessage,
   PluginRefractiveGuidanceResultMessage,
   PluginPlanGuidanceUpdateMessage,
+  PluginAssessmentUpdateMessage,
+  PluginPatientProfileUpdateMessage,
+  PluginInvestigationGuidanceUpdateMessage,
 } from "@/postmessage/types";
 
 // Resolved at module load time — the value is embedded by Next.js at build time
@@ -89,6 +96,16 @@ export interface UsePostMessageReturn {
   refractiveGuidanceRequest: RefractiveGuidanceRequest | null;
   sendRefractiveGuidanceResult: (visitId: string, result: RefractiveGuidanceOutcome) => void;
   sendPlanGuidanceUpdate: (visitId: string, result: PlanGuidanceResult) => void;
+  sendAssessmentUpdate: (visitId: string, assessmentContext: string) => void;
+  sendPatientProfileUpdate: (
+    visitId: string,
+    result: {
+      patientSnapshot?: string;
+      previousVisitSummary?: string;
+      timelineSummary?: string;
+    },
+  ) => void;
+  sendInvestigationGuidanceUpdate: (visitId: string, result: InvestigationGuidanceResult) => void;
 }
 
 export function usePostMessage(): UsePostMessageReturn {
@@ -316,6 +333,60 @@ export function usePostMessage(): UsePostMessageReturn {
     postToParent(msg);
   }, []);
 
+  // Token is NOT included — same posture as sendDifferentialUpdate. Pure
+  // reuse: `assessmentContext` is the exact already-validated
+  // ASSESSMENT_CONTEXT text, not new content.
+  const sendAssessmentUpdate = useCallback((visitId: string, assessmentContext: string) => {
+    const msg: PluginAssessmentUpdateMessage = {
+      type: MSG_PLUGIN_ASSESSMENT_UPDATE,
+      pluginId: PLUGIN_ID,
+      visitId,
+      assessmentContext,
+    };
+    postToParent(msg);
+  }, []);
+
+  // Token is NOT included — same posture as sendDifferentialUpdate. Pure
+  // reuse: each field is the exact already-validated section text; fields
+  // are independently optional, matching decidePatientProfileUpdate's
+  // "omit rather than show broken" per-section behavior.
+  const sendPatientProfileUpdate = useCallback(
+    (
+      visitId: string,
+      result: {
+        patientSnapshot?: string;
+        previousVisitSummary?: string;
+        timelineSummary?: string;
+      },
+    ) => {
+      const msg: PluginPatientProfileUpdateMessage = {
+        type: MSG_PLUGIN_PATIENT_PROFILE_UPDATE,
+        pluginId: PLUGIN_ID,
+        visitId,
+        ...result,
+      };
+      postToParent(msg);
+    },
+    [],
+  );
+
+  // Token is NOT included — same posture as sendDifferentialUpdate/
+  // sendPlanGuidanceUpdate. Sent once per successful consolidated generation
+  // (and again after Regenerate) once investigationGuidance validates
+  // successfully.
+  const sendInvestigationGuidanceUpdate = useCallback(
+    (visitId: string, result: InvestigationGuidanceResult) => {
+      const msg: PluginInvestigationGuidanceUpdateMessage = {
+        type: MSG_PLUGIN_INVESTIGATION_GUIDANCE_UPDATE,
+        pluginId: PLUGIN_ID,
+        visitId,
+        result,
+      };
+      postToParent(msg);
+    },
+    [],
+  );
+
   return {
     session,
     confirmDraft,
@@ -329,5 +400,8 @@ export function usePostMessage(): UsePostMessageReturn {
     refractiveGuidanceRequest,
     sendRefractiveGuidanceResult,
     sendPlanGuidanceUpdate,
+    sendAssessmentUpdate,
+    sendPatientProfileUpdate,
+    sendInvestigationGuidanceUpdate,
   };
 }

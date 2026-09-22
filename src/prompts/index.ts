@@ -275,6 +275,52 @@ Rules for this response:
 - Do not fabricate documented details that are not present. State only documentary correlations — never recommend, instruct, or imply any clinical action.
 - This task does not cover occupation, cost, affordability, or investigation-ordering — do not reason about or mention any of these.`;
 
+// ── Investigation Guidance instructions (shared) ──────────────────────────────
+// INVESTIGATION_GUIDANCE is part of the eager consolidated call, same
+// reasoning as PLAN_GUIDANCE — its inputs (chief complaint, history,
+// diagnoses, already-ordered investigations) are already fetched for the
+// other sections regardless.
+//
+// Structurally closest to DIFFERENTIAL_DIAGNOSIS: a variable-length,
+// confidence-graded list of correlative considerations, never a fixed block
+// count the way PLAN_GUIDANCE is. Unlike Plan Guidance's hard retrospective-
+// only rule, there is nothing to be "retrospective about" here — the entire
+// point is naming an investigation not yet in the record — so the guardrail
+// is correlative framing (association, never instruction or requirement),
+// enforced by the shared IMPERATIVE_LANGUAGE_PATTERNS plus a dedicated
+// DIRECTIVE_LANGUAGE_PATTERNS reject list in validation/response.ts for
+// non-imperative but still directive phrasing ("needs," "requires," "should
+// undergo," "must be ordered," "is indicated," "warrants," etc.).
+
+const INVESTIGATION_GUIDANCE_INSTRUCTIONS = `Task: Correlate the documented clinical picture (chief complaint, history of presenting illness, past medical history, documented diagnoses, vitals, refraction/visual acuity) into investigations that are commonly associated with that picture, for the treating doctor's own consideration. This is NOT an instruction to order any investigation — the doctor decides what, if anything, to pursue.
+
+DATA LIMITATION — you do not have access to:
+- Anterior Segment or Posterior Segment exam findings themselves (only whether those sub-tabs are documented, not their content)
+- Raw laboratory values, imaging, or investigation RESULTS
+Do not imply access to findings or results you do not have. Do not suggest an investigation that is already documented as ordered (pending or completed) for this patient at any visit — check the Investigations entries in the record first.
+
+Structure your response as a series of suggestion blocks, ordered from most to least correlated with the documented record. Do NOT add a section title or heading before the first block — begin your response directly with the first block. Use EXACTLY this structure for every block, in this exact line order, with a blank line between blocks and no blank line within a block:
+
+**[Investigation name]**
+[Correlative rationale — one short, precise line, e.g. "Documented [finding] is consistent with a clinical picture where [investigation] is commonly used to assess [X]." NEVER phrase as an instruction, a need, or a requirement.]
+Confidence: [Low / Moderate]
+Source: [documented finding or visit reference this is correlated from — OMIT THIS ENTIRE LINE if the suggestion is based on general clinical association rather than a specific documented finding; never write a placeholder such as "Source: none" in its place]
+
+For example, given a record documenting a chief complaint of gradual central vision distortion and a provisional diagnosis of age-related macular degeneration:
+
+**Optical Coherence Tomography (OCT)**
+Documented gradual central vision distortion and a provisional diagnosis of age-related macular degeneration are consistent with a clinical picture where OCT is commonly used to assess retinal layer changes.
+Confidence: Moderate
+Source: V0 2024-06-15
+
+Rules for this list:
+- Use ONLY "Low" or "Moderate" as the value on the Confidence line — same restriction as Differential Diagnosis. NEVER use language implying certainty or urgency.
+- Never suggest an investigation already documented as ordered (pending or completed) for this patient at any documented visit.
+- Do not pad the list, but do not leave it empty either when the record documents any complaint, finding, or diagnosis to correlate from.
+- Only if nothing in the documented record correlates to a specific investigation, write this exact sentence and nothing else in this section: "No additional investigations are suggested based on the documented record at this time."
+- Never use directive, need-based, or requirement language for the investigation itself. Do not begin any line with, or otherwise use, words like "Check," "Examine," "Look for," "Rule out," "Perform," or "Order" as a command directed at the doctor — but "commonly used to assess/evaluate/screen for/test for X" (describing what an investigation is FOR, as in the example above) is exactly the required framing and is always correct. Also never use constructions like "should undergo," "needs," "requires," "must be ordered," "is indicated," "warrants," "recommend," or "advised." Describe an association, never a requirement or instruction.
+- Do not fabricate documented details that are not present. State only documentary correlations.`;
+
 // ── Capability-specific instructions ─────────────────────────────────────────
 
 const CAPABILITY_INSTRUCTIONS: Record<Capability, string> = {
@@ -565,6 +611,8 @@ Rules:
 
   PLAN_GUIDANCE: PLAN_GUIDANCE_INSTRUCTIONS,
 
+  INVESTIGATION_GUIDANCE: INVESTIGATION_GUIDANCE_INSTRUCTIONS,
+
   QUESTION: `Task: Answer the doctor's question based strictly on the documented patient record.
 
 Rules:
@@ -614,19 +662,20 @@ export function buildUserMessage(
   return message;
 }
 
-// ── Consolidated prompt (one call → all 11 sections) ─────────────────────────
-// One AI call generates all 12 sections. DIFFERENTIAL_DIAGNOSIS and
-// PLAN_GUIDANCE instructions are the same constants used by the standalone
-// CAPABILITY_INSTRUCTIONS path so the two paths can never silently drift
-// apart. EXAM_GUIDANCE and REFRACTIVE_GUIDANCE are deliberately NOT part of
-// this consolidated bundle — they're on-demand only (see
-// CAPABILITY_INSTRUCTIONS.EXAM_GUIDANCE / .REFRACTIVE_GUIDANCE below, used
-// solely by the standalone /api/copilot/stream path). PLAN_GUIDANCE IS
-// eager/consolidated — all its inputs are already fetched for the other 11
-// sections regardless (see the comment above PLAN_GUIDANCE_INSTRUCTIONS).
+// ── Consolidated prompt (one call → all 13 sections) ─────────────────────────
+// One AI call generates all 13 sections. DIFFERENTIAL_DIAGNOSIS,
+// PLAN_GUIDANCE, and INVESTIGATION_GUIDANCE instructions are the same
+// constants used by the standalone CAPABILITY_INSTRUCTIONS path so the two
+// paths can never silently drift apart. EXAM_GUIDANCE and REFRACTIVE_GUIDANCE
+// are deliberately NOT part of this consolidated bundle — they're on-demand
+// only (see CAPABILITY_INSTRUCTIONS.EXAM_GUIDANCE / .REFRACTIVE_GUIDANCE
+// below, used solely by the standalone /api/copilot/stream path).
+// PLAN_GUIDANCE and INVESTIGATION_GUIDANCE ARE eager/consolidated — all their
+// inputs are already fetched for the other sections regardless (see the
+// comments above PLAN_GUIDANCE_INSTRUCTIONS / INVESTIGATION_GUIDANCE_INSTRUCTIONS).
 
 const CONSOLIDATED_SECTION_INSTRUCTIONS = `OUTPUT FORMAT REQUIREMENT:
-Return a single JSON object with EXACTLY these 12 keys. Each value is a clinical text string in markdown-lite format (## Heading, **Label:** value, - bullet). Return ONLY the JSON object — no preamble, no commentary, no code fence.
+Return a single JSON object with EXACTLY these 13 keys. Each value is a clinical text string in markdown-lite format (## Heading, **Label:** value, - bullet). Return ONLY the JSON object — no preamble, no commentary, no code fence.
 
 {
   "snapshot": "...",
@@ -640,7 +689,8 @@ Return a single JSON object with EXACTLY these 12 keys. Each value is a clinical
   "investigations": "...",
   "assessmentContext": "...",
   "suggestedQuestions": "...",
-  "planGuidance": "..."
+  "planGuidance": "...",
+  "investigationGuidance": "..."
 }
 
 SECTION-BY-SECTION INSTRUCTIONS:
@@ -715,7 +765,10 @@ Rules:
 - If the record appears complete for the documented visit scope, write exactly: "No significant documentation gaps identified."
 
 planGuidance (Plan tab guidance: documented treatment progression, patient-reassurance framing, and — only when the record provides one — a cited government scheme — apply these instructions in full and exactly as written; this section carries a stricter, independently field-validated format, so do not condense or paraphrase them):
-${PLAN_GUIDANCE_INSTRUCTIONS}`;
+${PLAN_GUIDANCE_INSTRUCTIONS}
+
+investigationGuidance (Investigations tab guidance: investigations commonly associated with the documented clinical picture — apply these instructions in full and exactly as written; this section carries a stricter, independently field-validated format, so do not condense or paraphrase them):
+${INVESTIGATION_GUIDANCE_INSTRUCTIONS}`;
 
 export function buildConsolidatedSystemPrompt(): string {
   return `${SAFETY_PREAMBLE}\n\n${CONSOLIDATED_SECTION_INSTRUCTIONS}`;
