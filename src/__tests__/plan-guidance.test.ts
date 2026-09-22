@@ -92,6 +92,14 @@ function buildConsolidatedResponseText(planGuidanceText: string): string {
   return JSON.stringify({ ...SAFE_OTHER_SECTIONS, planGuidance: planGuidanceText });
 }
 
+// Same as buildConsolidatedResponseText, but lets a test override the
+// followUp section's own text — used to prove followUpSummary is sourced
+// from that section's actual content (not a hardcoded pass-through), and to
+// simulate followUp itself failing validation.
+function buildConsolidatedResponseTextWithFollowUp(planGuidanceText: string, followUpText: string): string {
+  return JSON.stringify({ ...SAFE_OTHER_SECTIONS, followUp: followUpText, planGuidance: planGuidanceText });
+}
+
 // ── Fixture response texts ────────────────────────────────────────────────────
 
 const NO_SCHEME_WELL_FORMED = `[Documented Progression]
@@ -186,6 +194,52 @@ describe("PLAN_GUIDANCE capability (consolidated path)", () => {
     if (result.ok) {
       expect(result.data.planGuidance.ok).toBe(true);
       if (result.data.planGuidance.ok) {
+        expect(result.data.planGuidance.planGuidanceResult).toEqual({
+          documentedProgression:
+            "Timolol 0.5% documented from V1 2023-12-10; continued through V0 2024-06-15.",
+          followUpSummary: SAFE_OTHER_SECTIONS.followUp,
+          comfortingGuidance:
+            "Patients documented with stable glaucoma monitoring are often reassured to learn regular follow-up detects change early.",
+        });
+      }
+    }
+  });
+
+  it("followUpSummary is threaded from the FOLLOW_UP_SUMMARY section's own validated text, not regenerated", async () => {
+    const distinctFollowUpText = "Documented follow-up plan: return in 6 weeks per prior recorded scheduling.";
+    setProvider(
+      makeMockProvider(
+        buildConsolidatedResponseTextWithFollowUp(NO_SCHEME_WELL_FORMED, distinctFollowUpText),
+      ),
+    );
+
+    const result = await generate();
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.followUp.ok).toBe(true);
+      expect(result.data.planGuidance.ok).toBe(true);
+      if (result.data.planGuidance.ok) {
+        expect(result.data.planGuidance.planGuidanceResult?.followUpSummary).toBe(distinctFollowUpText);
+      }
+    }
+  });
+
+  it("followUpSummary is omitted (not an error) when FOLLOW_UP_SUMMARY itself fails validation", async () => {
+    // Under 20 chars triggers RESPONSE_EMPTY for the followUp section alone —
+    // planGuidance's own blocks are unaffected and should still pass.
+    setProvider(
+      makeMockProvider(buildConsolidatedResponseTextWithFollowUp(NO_SCHEME_WELL_FORMED, "too short")),
+    );
+
+    const result = await generate();
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.followUp.ok).toBe(false);
+      expect(result.data.planGuidance.ok).toBe(true);
+      if (result.data.planGuidance.ok) {
+        expect(result.data.planGuidance.planGuidanceResult?.followUpSummary).toBeUndefined();
         expect(result.data.planGuidance.planGuidanceResult).toEqual({
           documentedProgression:
             "Timolol 0.5% documented from V1 2023-12-10; continued through V0 2024-06-15.",

@@ -294,6 +294,25 @@ export async function generateCopilot(
     }
   }
 
+  // Thread the already-validated FOLLOW_UP_SUMMARY text into planGuidance's
+  // result — the exact same content the Follow-up tab already shows,
+  // referenced a second time inside the Plan Guidance card. No new AI call,
+  // no new validation: this runs after both sections are independently
+  // resolved above, so it doesn't depend on SECTION_KEYS iteration order.
+  // Absent (not an error) when followUp itself failed or was empty —
+  // Plan Guidance's other sections are entirely unaffected either way.
+  const followUpSection = sections.followUp;
+  const planGuidanceSection = sections.planGuidance;
+  if (followUpSection?.ok && planGuidanceSection?.ok && planGuidanceSection.planGuidanceResult) {
+    sections.planGuidance = {
+      ...planGuidanceSection,
+      planGuidanceResult: {
+        ...planGuidanceSection.planGuidanceResult,
+        followUpSummary: followUpSection.text,
+      },
+    };
+  }
+
   logger.info("generate_complete", {
     requestId,
     model: doneMeta?.model,
