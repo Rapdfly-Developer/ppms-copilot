@@ -106,6 +106,8 @@ export function useCopilotGenerate(): UseCopilotGenerateReturn {
           suggestedQuestions: r.suggestedQuestions as SectionOutcome,
           planGuidance: r.planGuidance as SectionOutcome,
           investigationGuidance: r.investigationGuidance as SectionOutcome,
+          diagnosisComparison: r.diagnosisComparison as SectionOutcome,
+          lastVisitSummary: r.lastVisitSummary as SectionOutcome,
         } satisfies CopilotData,
         meta: (r.meta ?? {}) as Record<string, unknown>,
       };

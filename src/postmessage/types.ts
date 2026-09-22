@@ -26,6 +26,7 @@ import {
 } from "@/lib/constants";
 import type {
   DifferentialDiagnosisItem,
+  DiagnosisComparisonResult,
   ExamGuidanceSection,
   RefractiveGuidanceResult,
   PlanGuidanceResult,
@@ -189,14 +190,15 @@ export type PluginAssessmentUpdateMessage = {
   pluginId: typeof PLUGIN_ID;
   visitId: string;
   assessmentContext: string;
+  diagnosisComparison?: DiagnosisComparisonResult;
 };
 
 // Sent once per successful consolidated generation (and again after
 // Regenerate), carrying whichever of the three underlying sections validated
 // successfully this generation — each field is independently optional
 // ("omit rather than show broken", same as PlanGuidanceResult.followUpSummary).
-// Pure reuse: no new AI call, no new validator — these are the exact
-// PATIENT_SNAPSHOT / PREVIOUS_VISIT_SUMMARY / TIMELINE_SUMMARY texts already
+// These are the exact validated
+// PATIENT_SNAPSHOT / PREVIOUS_VISIT_SUMMARY / LAST_VISIT_SUMMARY texts already
 // shown in the Copilot's own tabs.
 export type PluginPatientProfileUpdateMessage = {
   type: typeof MSG_PLUGIN_PATIENT_PROFILE_UPDATE;
@@ -204,7 +206,7 @@ export type PluginPatientProfileUpdateMessage = {
   visitId: string;
   patientSnapshot?: string;
   previousVisitSummary?: string;
-  timelineSummary?: string;
+  lastVisitSummary?: string;
 };
 
 // Sent once per successful consolidated generation (and again after

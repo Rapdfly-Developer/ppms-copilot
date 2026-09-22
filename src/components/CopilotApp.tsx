@@ -76,7 +76,9 @@ type SectionKey =
   | "assessmentContext"
   | "suggestedQuestions"
   | "planGuidance"
-  | "investigationGuidance";
+  | "investigationGuidance"
+  | "diagnosisComparison"
+  | "lastVisitSummary";
 
 const CAPABILITY_TO_SECTION: Partial<Record<Capability, SectionKey>> = {
   PATIENT_SNAPSHOT:       "snapshot",
@@ -92,6 +94,8 @@ const CAPABILITY_TO_SECTION: Partial<Record<Capability, SectionKey>> = {
   SUGGESTED_QUESTIONS:    "suggestedQuestions",
   PLAN_GUIDANCE:          "planGuidance",
   INVESTIGATION_GUIDANCE: "investigationGuidance",
+  DIAGNOSIS_COMPARISON: "diagnosisComparison",
+  LAST_VISIT_SUMMARY: "lastVisitSummary",
 };
 
 // Converts the consolidated state + active capability into the StreamState
@@ -440,7 +444,7 @@ export default function CopilotApp() {
     const decision = decideAssessmentUpdate(state, assessmentSentForRef.current);
     if (!decision.send || !session) return;
     assessmentSentForRef.current = decision.requestId;
-    sendAssessmentUpdate(session.visitId, decision.assessmentContext);
+    sendAssessmentUpdate(session.visitId, decision.assessmentContext, decision.diagnosisComparison);
   }, [state, session, sendAssessmentUpdate]);
 
   // Notify PPMS Core once per successful generation so it can render a
@@ -456,7 +460,7 @@ export default function CopilotApp() {
       ...(decision.previousVisitSummary !== undefined
         ? { previousVisitSummary: decision.previousVisitSummary }
         : {}),
-      ...(decision.timelineSummary !== undefined ? { timelineSummary: decision.timelineSummary } : {}),
+      ...(decision.lastVisitSummary !== undefined ? { lastVisitSummary: decision.lastVisitSummary } : {}),
     });
   }, [state, session, sendPatientProfileUpdate]);
 

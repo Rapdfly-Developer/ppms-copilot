@@ -21,6 +21,9 @@ export type ContextStats = {
 
 // The output of the context builder — what gets sent (via prompt) to the AI
 export type PatientContext = {
+  diagnosisComparisonText?: string;
+  lastVisitText?: string;
+  hasDocumentedDiagnosis?: boolean;
   text: string;       // clinical context text; fenced in <patient_record> by PromptBuilder
   stats: ContextStats;
   visitId: string;    // kept for audit correlation — NOT included in the AI context text

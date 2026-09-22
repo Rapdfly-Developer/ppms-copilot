@@ -18,6 +18,8 @@
 import type { Capability } from "@/capabilities";
 import type {
   DifferentialDiagnosisItem,
+  DifferentialReasonCitation,
+  DiagnosisComparisonResult,
   ExamGuidanceSection,
   RefractiveGuidanceResult,
   RefractiveEyeGuidance,
@@ -228,7 +230,7 @@ function extractConsiderationsSection(text: string): string {
 // replacement for the old loose-candidate cross-check: because every block is
 // parsed field-by-field, there is no "well-formed subset" for a malformed
 // block to hide behind.
-function parseConsiderationBlock(block: string): DifferentialDiagnosisItem | null {
+function parseConsiderationBlock(block: string): (DifferentialDiagnosisItem & { reason: string }) | null {
   const lines = block.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
   if (lines.length < 3) return null;
 
@@ -279,11 +281,11 @@ function parseConsiderationBlock(block: string): DifferentialDiagnosisItem | nul
     source = sourceMatch[1].trim();
   }
 
-  return { name: nameMatch[1].trim(), confidence, ...(source ? { source } : {}) };
+  return { name: nameMatch[1].trim(), confidence, reason: reasonLines.join("\n"), ...(source ? { source } : {}) };
 }
 
 type DifferentialValidation =
-  | { ok: true; items: DifferentialDiagnosisItem[] }
+  | { ok: true; items: DifferentialDiagnosisItem[]; reasons: DifferentialReasonCitation[] }
   | { ok: false; reason: string; code: string };
 
 // Validates AND structurally extracts in one pass — the returned items are
@@ -320,7 +322,7 @@ function validateDifferentialDiagnosis(sanitised: string): DifferentialValidatio
   // second block (even a malformed fragment) alongside the sentence must
   // still fail closed rather than being masked by the valid refusal.
   if (rawBlocks.length === 1 && rawBlocks[0] === DIFFERENTIAL_NO_EVIDENCE_SENTENCE) {
-    return { ok: true, items: [] };
+    return { ok: true, items: [], reasons: [] };
   }
 
   // Merge orphaned tail fragments caused by blank lines within a block.
@@ -351,6 +353,7 @@ function validateDifferentialDiagnosis(sanitised: string): DifferentialValidatio
   // decision: always attempt a best-effort list from whatever documented
   // symptoms/history exist, rather than refusing when evidence is thin).
   const items: DifferentialDiagnosisItem[] = [];
+  const reasons: DifferentialReasonCitation[] = [];
   for (const block of blocks) {
     const parsed = parseConsiderationBlock(block);
     if (!parsed) {
@@ -375,10 +378,12 @@ function validateDifferentialDiagnosis(sanitised: string): DifferentialValidatio
       };
     }
 
-    items.push(parsed);
+    const { reason, ...item } = parsed;
+    items.push(item);
+    reasons.push({ name: item.name, reason });
   }
 
-  return { ok: true, items };
+  return { ok: true, items, reasons };
 }
 
 // ── Shared imperative-language check ──────────────────────────────────────────
@@ -1095,11 +1100,42 @@ function validateInvestigationGuidance(sanitised: string): InvestigationGuidance
   return { ok: true, result: { suggestedInvestigations } };
 }
 
+// Scoped exception: descriptive "do not rule out" is permitted here only.
+const DIAGNOSIS_COMPARISON_IMPERATIVE_PATTERNS = IMPERATIVE_LANGUAGE_PATTERNS.filter(
+  (pattern) => pattern.source !== /\bRule out\b/i.source,
+);
+const OVERRIDING_LANGUAGE_PATTERNS = [
+  /\bincorrect\b/i, /\bwrong\b/i, /\bshould be\b/i, /\bmisdiagnosed\b/i,
+  /\bshould have been\b/i, /\bis actually\b/i, /\bmistaken\b/i,
+];
+
+function validateDiagnosisComparison(text: string):
+  | { ok: true; result: DiagnosisComparisonResult }
+  | { ok: false; code: string; reason: string } {
+  if ([...DIAGNOSIS_COMPARISON_IMPERATIVE_PATTERNS, ...OVERRIDING_LANGUAGE_PATTERNS]
+    .some((pattern) => pattern.test(text))) {
+    return { ok: false, code: "RESPONSE_UNSAFE", reason: "Contains imperative or overriding language" };
+  }
+  const normalised = text.replace(/\r\n/g, "\n").trim();
+  if (normalised === "[Plausibility]\nNot applicable — no documented diagnosis for this visit.") {
+    return { ok: true, result: {} };
+  }
+  const match = normalised.match(/^\[Plausibility\]\s*\nAssessment: (Plausible|Worth reviewing)\s*\nReason: ([^\n]+)$/);
+  if (!match || !match[2].trim()) {
+    return { ok: false, code: "DIAGNOSIS_COMPARISON_STRUCTURE_INVALID", reason: "Expected a single Plausibility block" };
+  }
+  return { ok: true, result: { plausibility: {
+    assessment: match[1] as "Plausible" | "Worth reviewing", reason: match[2].trim(),
+  } } };
+}
+
 export type ValidationResult =
   | {
       ok: true;
       warnings: string[];
       differentialDiagnosisItems?: DifferentialDiagnosisItem[];
+      differentialReasonCitations?: DifferentialReasonCitation[];
+      diagnosisComparisonResult?: DiagnosisComparisonResult;
       examGuidanceSections?: ExamGuidanceSection[];
       refractiveGuidanceResult?: RefractiveGuidanceResult;
       planGuidanceResult?: PlanGuidanceResult;
@@ -1156,10 +1192,14 @@ export function validateResponse(
   // via the PLUGIN_DIFFERENTIAL_UPDATE postMessage) — the exact same blocks
   // that passed validation here, never re-parsed a second time on the client.
   let differentialDiagnosisItems: DifferentialDiagnosisItem[] | undefined;
+  let differentialReasonCitations: DifferentialReasonCitation[] | undefined;
   if (capability === "DIFFERENTIAL_DIAGNOSIS") {
-    const result = validateDifferentialDiagnosis(sanitised);
+    // Safety checks above inspect the sanitised text; citations preserve the
+    // original accepted wording, matching the existing displayed DDx text.
+    const result = validateDifferentialDiagnosis(text);
     if (!result.ok) return result;
     differentialDiagnosisItems = result.items;
+    differentialReasonCitations = result.reasons;
   }
 
   // 4c. EXAM_GUIDANCE: two fixed segment blocks, documentary framing only.
@@ -1209,6 +1249,13 @@ export function validateResponse(
     investigationGuidanceResult = result.result;
   }
 
+  let diagnosisComparisonResult: DiagnosisComparisonResult | undefined;
+  if (capability === "DIAGNOSIS_COMPARISON") {
+    const result = validateDiagnosisComparison(sanitised);
+    if (!result.ok) return result;
+    diagnosisComparisonResult = result.result;
+  }
+
   // 5. Warning patterns (soft — response allowed through with annotations)
   const warnings = WARNING_PATTERNS.filter(({ pattern }) => pattern.test(sanitised)).map(
     ({ warning }) => warning,
@@ -1218,6 +1265,8 @@ export function validateResponse(
     ok: true,
     warnings,
     ...(differentialDiagnosisItems ? { differentialDiagnosisItems } : {}),
+    ...(differentialReasonCitations ? { differentialReasonCitations } : {}),
+    ...(diagnosisComparisonResult ? { diagnosisComparisonResult } : {}),
     ...(examGuidanceSections ? { examGuidanceSections } : {}),
     ...(refractiveGuidanceResult ? { refractiveGuidanceResult } : {}),
     ...(planGuidanceResult ? { planGuidanceResult } : {}),

@@ -19,6 +19,8 @@ export const CAPABILITIES = {
   REFRACTIVE_GUIDANCE: "REFRACTIVE_GUIDANCE",
   PLAN_GUIDANCE: "PLAN_GUIDANCE",
   INVESTIGATION_GUIDANCE: "INVESTIGATION_GUIDANCE",
+  DIAGNOSIS_COMPARISON: "DIAGNOSIS_COMPARISON",
+  LAST_VISIT_SUMMARY: "LAST_VISIT_SUMMARY",
   QUESTION: "QUESTION",
 } as const;
 
@@ -269,6 +271,41 @@ export const CAPABILITY_CONFIG: Record<Capability, CapabilityConfig> = {
     producesDraft: false,
     reasoningEffort: "high",
     modelTier: "reasoning",
+  },
+  DIAGNOSIS_COMPARISON: {
+    label: "Diagnosis Comparison",
+    description:
+      "Assesses whether the documented diagnosis is consistent with documented findings, plus a citation of the same-generation Differential Diagnosis reasoning, for the Assessment tab",
+    // Only needs current-visit chief complaint/HPI/findings and the
+    // documented diagnosis itself — the Differential Diagnosis list it also
+    // surfaces is consumed via post-hoc application code (the same-generation
+    // differentialDiagnosisItems/reasons), never fed back into this prompt.
+    includes: { demographics: true, currentVisit: true, visitHistory: true, appointments: false, timeline: false },
+    visitLimit: 3,
+    // 1200 includes the fast model's hidden reasoning tokens. The original
+    // 500-token budget truncated even a basic cataract sanity case.
+    maxTokens: 1200,
+    permission: "ai.copilot.draft",
+    producesDraft: false,
+    // fast/medium, not high/reasoning: a narrow single-field judgment doesn't
+    // need the deeper reasoning tier open-ended differential reasoning does.
+    reasoningEffort: "medium",
+    modelTier: "fast",
+  },
+  LAST_VISIT_SUMMARY: {
+    label: "Last Visit Summary",
+    description: "Focused summary of specifically the single most recent previous visit (V1), for the Patient Profile card",
+    // visitLimit 1 + visitHistory (which excludes the current visit) means
+    // exactly V1 — the single most recent previous visit — is fetched, the
+    // same underlying data PREVIOUS_VISIT_SUMMARY already reads, just
+    // narrowed to one visit instead of three.
+    includes: { demographics: true, currentVisit: false, visitHistory: true, appointments: false, timeline: false },
+    visitLimit: 1,
+    maxTokens: 900,
+    permission: "ai.copilot.summarize",
+    producesDraft: false,
+    reasoningEffort: "medium",
+    modelTier: "fast",
   },
   QUESTION: {
     label: "Ask a Question",

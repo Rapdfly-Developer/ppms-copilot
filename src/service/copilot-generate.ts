@@ -28,13 +28,13 @@
 import { validateResponse } from "@/validation/response";
 import { createProvider } from "@/ai";
 import { AiProviderError } from "@/ai/provider";
-import { getCopilotReasoningModel } from "@/lib/env";
+import { getCopilotReasoningModel, getCopilotFastModel } from "@/lib/env";
 import { CopilotError, USER_MESSAGES, type ErrorCode } from "@/lib/errors";
 import { logger } from "@/lib/logger";
 import { buildConsolidatedContext } from "@/context/builder";
-import { buildConsolidatedSystemPrompt, buildConsolidatedUserMessage } from "@/prompts";
-import type { Capability } from "@/capabilities";
-import type { SectionOutcome, CopilotData } from "@/types/client";
+import { buildSystemPrompt, buildUserMessage, buildConsolidatedSystemPrompt, buildConsolidatedUserMessage } from "@/prompts";
+import { CAPABILITY_CONFIG, type Capability } from "@/capabilities";
+import type { DifferentialReasonCitation, SectionOutcome, CopilotData } from "@/types/client";
 
 // ── Token decoder ─────────────────────────────────────────────────────────────
 // Mirrors the logic in src/schemas/request.ts — no verification here, PPMS Core
@@ -64,7 +64,7 @@ function decodeToken(authorizationHeader: string | null): TokenRouting | null {
 
 // ── Section validation ────────────────────────────────────────────────────────
 
-const SECTION_CAPABILITIES: Record<keyof CopilotData, Capability> = {
+const SECTION_CAPABILITIES: Record<Exclude<keyof CopilotData, "diagnosisComparison" | "lastVisitSummary">, Capability> = {
   snapshot: "PATIENT_SNAPSHOT",
   previousVisits: "PREVIOUS_VISIT_SUMMARY",
   timeline: "TIMELINE_SUMMARY",
@@ -80,7 +80,7 @@ const SECTION_CAPABILITIES: Record<keyof CopilotData, Capability> = {
   investigationGuidance: "INVESTIGATION_GUIDANCE",
 };
 
-const SECTION_KEYS = Object.keys(SECTION_CAPABILITIES) as Array<keyof CopilotData>;
+const SECTION_KEYS = Object.keys(SECTION_CAPABILITIES) as Array<keyof typeof SECTION_CAPABILITIES>;
 
 function errorSection(code: string): SectionOutcome {
   const errorMessage =
@@ -253,9 +253,10 @@ export async function generateCopilot(
   }
 
   // 6. Validate each section individually — a single failure does not discard others
-  const latencyMs = Date.now() - pipelineStart;
+  let latencyMs = Date.now() - pipelineStart;
   const sections: Partial<CopilotData> = {};
   const sectionResults: Record<string, string> = {};
+  let differentialReasons: DifferentialReasonCitation[] = [];
 
   for (const key of SECTION_KEYS) {
     const capability = SECTION_CAPABILITIES[key];
@@ -284,6 +285,7 @@ export async function generateCopilot(
     } else {
       // Some models double-escape newlines inside json_object responses, emitting
       // literal \n (two chars) instead of a real newline. Normalise before storing.
+      if (key === "differentialDiagnosis") differentialReasons = validation.differentialReasonCitations ?? [];
       const normalised = raw.replace(/\\n/g, "\n").replace(/\\t/g, "\t");
       sections[key] = {
         ok: true,
@@ -301,6 +303,62 @@ export async function generateCopilot(
       };
       sectionResults[key] = validation.warnings.length > 0 ? "ok_with_warnings" : "ok";
     }
+  }
+
+  // These eager sections must actually use fast/medium, independently of the
+  // high/reasoning consolidated bundle. Reuse the fetched DTOs; V1's request
+  // contains no V0 or older visit data. Failures remain local to each section.
+  await Promise.all(([
+    ["diagnosisComparison", "DIAGNOSIS_COMPARISON", context.diagnosisComparisonText],
+    ["lastVisitSummary", "LAST_VISIT_SUMMARY", context.lastVisitText],
+  ] as const).map(async ([key, capability, scopedContext]) => {
+    try {
+      const config = CAPABILITY_CONFIG[capability];
+      const response = await provider.complete({
+        systemPrompt: buildSystemPrompt(capability),
+        messages: [{ role: "user", content: buildUserMessage(scopedContext ?? "No record documented.", capability) }],
+        modelOverride: getCopilotFastModel(), reasoningEffort: config.reasoningEffort,
+        maxTokens: config.maxTokens,
+      });
+      // Include the auxiliary calls in usage totals, not just the large bundle.
+      if (doneMeta) {
+        doneMeta.inputTokens += response.usage.inputTokens;
+        doneMeta.outputTokens += response.usage.outputTokens;
+      }
+      const validation = validateResponse(response.text, capability, response.stopReason);
+      if (!validation.ok) {
+        sections[key] = errorSection(validation.code);
+        sectionResults[key] = `validation_failed:${validation.code}`;
+        return;
+      }
+      sectionResults[key] = "ok";
+      sections[key] = { ok: true, text: response.text, warnings: validation.warnings,
+        ...(validation.diagnosisComparisonResult ? { diagnosisComparisonResult: validation.diagnosisComparisonResult } : {}),
+      };
+    } catch (error) {
+      sections[key] = errorSection(error instanceof AiProviderError ? error.code : "AI_UNAVAILABLE");
+      sectionResults[key] = "provider_failed";
+    }
+  }));
+
+  const comparison = sections.diagnosisComparison;
+  if (comparison?.ok && comparison.diagnosisComparisonResult) {
+    const plausibility = context.hasDocumentedDiagnosis
+      ? comparison.diagnosisComparisonResult.plausibility : undefined;
+    const citations = sections.differentialDiagnosis?.ok && differentialReasons.length
+      ? differentialReasons : undefined;
+    sections.diagnosisComparison = {
+      ...comparison,
+      text: [plausibility
+        ? `[Plausibility]\nAssessment: ${plausibility.assessment}\nReason: ${plausibility.reason}`
+        : "[Plausibility]\nNot applicable — no documented diagnosis for this visit.",
+        citations ? "[Differential Diagnosis Reasoning]\n" + citations.map((item) => `- ${item.name}: ${item.reason}`).join("\n") : "",
+      ].filter(Boolean).join("\n\n"),
+      diagnosisComparisonResult: {
+        ...(plausibility ? { plausibility } : {}),
+        ...(citations ? { differentialDiagnosisReasoning: citations } : {}),
+      },
+    };
   }
 
   // Thread the already-validated FOLLOW_UP_SUMMARY text into planGuidance's
@@ -344,6 +402,7 @@ export async function generateCopilot(
     };
   }
 
+  latencyMs = Date.now() - pipelineStart;
   logger.info("generate_complete", {
     requestId,
     model: doneMeta?.model,
@@ -370,6 +429,8 @@ export async function generateCopilot(
     suggestedQuestions: sections.suggestedQuestions ?? errorSection("INTERNAL_ERROR"),
     planGuidance: sections.planGuidance ?? errorSection("INTERNAL_ERROR"),
     investigationGuidance: sections.investigationGuidance ?? errorSection("INTERNAL_ERROR"),
+    diagnosisComparison: sections.diagnosisComparison ?? errorSection("INTERNAL_ERROR"),
+    lastVisitSummary: sections.lastVisitSummary ?? errorSection("INTERNAL_ERROR"),
   };
 
   const meta: GenerateMeta = {

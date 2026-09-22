@@ -65,7 +65,7 @@ async function fetchContext(
         : Promise.resolve(undefined),
 
       includes.visitHistory
-        ? getVisits(token, patientRef, visitLimit === 0 ? 20 : visitLimit)
+        ? getVisits(token, patientRef, capability === "LAST_VISIT_SUMMARY" ? 2 : visitLimit === 0 ? 20 : visitLimit)
         : Promise.resolve([] as VisitDTO[]),
 
       includes.appointments
@@ -391,7 +391,21 @@ export async function buildPatientContext(
     estimatedTokens: stats.estimatedTokens,
   });
 
-  return { text, stats, visitId, documented: fetched.currentVisit?.documented, matchedGovtScheme };
+  const previous = fetched.visitHistory
+    .filter((visit) => visit.visitId !== visitId)
+    .sort((a, b) => b.date.localeCompare(a.date))[0];
+  return {
+    text: capability === "LAST_VISIT_SUMMARY"
+      ? (previous ? renderVisit(previous, `Visit V1 (${previous.date})`) : "No previous visit documented.")
+      : capability === "DIAGNOSIS_COMPARISON"
+        ? (fetched.currentVisit ? renderVisit(fetched.currentVisit, "Current visit (V0)") : "No current visit documented.")
+        : text,
+    stats, visitId, documented: fetched.currentVisit?.documented, matchedGovtScheme,
+    hasDocumentedDiagnosis: Boolean(fetched.currentVisit?.diagnoses.length),
+    diagnosisComparisonText: fetched.currentVisit
+      ? renderVisit(fetched.currentVisit, "Current visit (V0)") : "No current visit documented.",
+    lastVisitText: previous ? renderVisit(previous, `Visit V1 (${previous.date})`) : "No previous visit documented.",
+  };
 }
 
 // Fetches the union of all MVP capabilities' data needs in one Promise.all,
@@ -439,5 +453,14 @@ export async function buildConsolidatedContext(args: {
     estimatedTokens: stats.estimatedTokens,
   });
 
-  return { text, stats, visitId, documented: fetched.currentVisit?.documented, matchedGovtScheme };
+  const previous = fetched.visitHistory
+    .filter((visit) => visit.visitId !== visitId)
+    .sort((a, b) => b.date.localeCompare(a.date))[0];
+  return {
+    text, stats, visitId, documented: fetched.currentVisit?.documented, matchedGovtScheme,
+    hasDocumentedDiagnosis: Boolean(fetched.currentVisit?.diagnoses.length),
+    diagnosisComparisonText: fetched.currentVisit
+      ? renderVisit(fetched.currentVisit, "Current visit (V0)") : "No current visit documented.",
+    lastVisitText: previous ? renderVisit(previous, `Visit V1 (${previous.date})`) : "No previous visit documented.",
+  };
 }

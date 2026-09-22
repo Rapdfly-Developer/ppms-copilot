@@ -14,10 +14,10 @@
 // Identity is the server's per-call GenerateMeta.requestId, not object
 // reference — same as decideDifferentialUpdate/decidePlanGuidanceUpdate.
 
-import type { CopilotGenerateState } from "@/types/client";
+import type { CopilotGenerateState, DiagnosisComparisonResult } from "@/types/client";
 
 export type AssessmentUpdateDecision =
-  | { send: true; assessmentContext: string; requestId: string }
+  | { send: true; assessmentContext: string; diagnosisComparison?: DiagnosisComparisonResult; requestId: string }
   | { send: false };
 
 export function decideAssessmentUpdate(
@@ -32,5 +32,8 @@ export function decideAssessmentUpdate(
   const section = state.data.assessmentContext;
   if (!section.ok) return { send: false };
 
-  return { send: true, assessmentContext: section.text, requestId };
+  const comparison = state.data.diagnosisComparison;
+  return { send: true, assessmentContext: section.text, requestId,
+    ...(comparison?.ok && comparison.diagnosisComparisonResult ? { diagnosisComparison: comparison.diagnosisComparisonResult } : {}),
+  };
 }

@@ -28,6 +28,7 @@ export const ERROR_CODES = {
   REFRACTIVE_GUIDANCE_STRUCTURE_INVALID: "REFRACTIVE_GUIDANCE_STRUCTURE_INVALID",
   PLAN_GUIDANCE_STRUCTURE_INVALID: "PLAN_GUIDANCE_STRUCTURE_INVALID",
   INVESTIGATION_GUIDANCE_STRUCTURE_INVALID: "INVESTIGATION_GUIDANCE_STRUCTURE_INVALID",
+  DIAGNOSIS_COMPARISON_STRUCTURE_INVALID: "DIAGNOSIS_COMPARISON_STRUCTURE_INVALID",
   INVALID_CAPABILITY: "INVALID_CAPABILITY",
   MISSING_PERMISSION: "MISSING_PERMISSION",
   INVALID_REQUEST: "INVALID_REQUEST",
@@ -77,6 +78,8 @@ export const USER_MESSAGES: Record<ErrorCode, string> = {
     "AI response did not follow the required plan guidance format. Please try again.",
   INVESTIGATION_GUIDANCE_STRUCTURE_INVALID:
     "AI response did not follow the required investigation guidance format. Please try again.",
+  DIAGNOSIS_COMPARISON_STRUCTURE_INVALID:
+    "AI response did not follow the required diagnosis comparison format. Please try again.",
   INVALID_CAPABILITY: "Invalid capability requested.",
   MISSING_PERMISSION: "You do not have permission to use this feature.",
   INVALID_REQUEST: "Invalid request. Please try again.",

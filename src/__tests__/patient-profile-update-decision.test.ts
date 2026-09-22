@@ -24,6 +24,8 @@ function makeDoneState(overrides: {
   const timelineOk = overrides.timelineOk ?? true;
 
   const data: CopilotData = {
+    diagnosisComparison: { ok: false, errorCode: "RESPONSE_EMPTY", errorMessage: "empty" },
+    lastVisitSummary: timelineOk ? OK_SECTION("timeline summary text") : FAIL_SECTION,
     snapshot: snapshotOk ? OK_SECTION("patient snapshot text") : FAIL_SECTION,
     previousVisits: previousVisitsOk ? OK_SECTION("previous visit summary text") : FAIL_SECTION,
     timeline: timelineOk ? OK_SECTION("timeline summary text") : FAIL_SECTION,
@@ -67,7 +69,7 @@ describe("decidePatientProfileUpdate", () => {
       requestId: "req-1",
       patientSnapshot: "patient snapshot text",
       previousVisitSummary: "previous visit summary text",
-      timelineSummary: "timeline summary text",
+      lastVisitSummary: "timeline summary text",
     });
   });
 
@@ -81,10 +83,10 @@ describe("decidePatientProfileUpdate", () => {
       requestId: "req-1",
       patientSnapshot: "patient snapshot text",
       previousVisitSummary: "previous visit summary text",
-      // timelineSummary intentionally absent — not undefined-valued, absent.
+      // lastVisitSummary intentionally absent — not undefined-valued, absent.
     });
     if (decision.send) {
-      expect("timelineSummary" in decision).toBe(false);
+      expect("lastVisitSummary" in decision).toBe(false);
     }
   });
 

@@ -3,8 +3,8 @@
 // unit-tested independently of the React effect that calls it, same
 // rationale as lib/differential-update.ts and lib/plan-guidance-update.ts.
 //
-// Pure reuse, no new AI call: this threads the three already-validated
-// section texts (PATIENT_SNAPSHOT, PREVIOUS_VISIT_SUMMARY, TIMELINE_SUMMARY)
+// This threads the three already-validated
+// section texts (PATIENT_SNAPSHOT, PREVIOUS_VISIT_SUMMARY, LAST_VISIT_SUMMARY)
 // out to PPMS Core, which renders them as sub-tabs within one Patient
 // Profile card. Each field is independently optional — one failed section
 // never blocks the other two ("omit rather than show broken", same as
@@ -27,7 +27,7 @@ export type PatientProfileUpdateDecision =
       requestId: string;
       patientSnapshot?: string;
       previousVisitSummary?: string;
-      timelineSummary?: string;
+      lastVisitSummary?: string;
     }
   | { send: false };
 
@@ -40,18 +40,18 @@ export function decidePatientProfileUpdate(
   const requestId = typeof state.meta?.requestId === "string" ? state.meta.requestId : null;
   if (!requestId || requestId === lastSentRequestId) return { send: false };
 
-  const { snapshot, previousVisits, timeline } = state.data;
+  const { snapshot, previousVisits, lastVisitSummary: lastVisit } = state.data;
   const patientSnapshot = snapshot.ok ? snapshot.text : undefined;
   const previousVisitSummary = previousVisits.ok ? previousVisits.text : undefined;
-  const timelineSummary = timeline.ok ? timeline.text : undefined;
+  const lastVisitSummary = lastVisit.ok ? lastVisit.text : undefined;
 
-  if (!patientSnapshot && !previousVisitSummary && !timelineSummary) return { send: false };
+  if (!patientSnapshot && !previousVisitSummary && !lastVisitSummary) return { send: false };
 
   return {
     send: true,
     requestId,
     ...(patientSnapshot ? { patientSnapshot } : {}),
     ...(previousVisitSummary ? { previousVisitSummary } : {}),
-    ...(timelineSummary ? { timelineSummary } : {}),
+    ...(lastVisitSummary ? { lastVisitSummary } : {}),
   };
 }

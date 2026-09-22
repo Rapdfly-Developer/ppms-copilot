@@ -38,6 +38,7 @@ import {
 import type {
   CopilotSession,
   DifferentialDiagnosisItem,
+  DiagnosisComparisonResult,
   ExamGuidanceSection,
   RefractiveGuidanceResult,
   PlanGuidanceResult,
@@ -96,13 +97,13 @@ export interface UsePostMessageReturn {
   refractiveGuidanceRequest: RefractiveGuidanceRequest | null;
   sendRefractiveGuidanceResult: (visitId: string, result: RefractiveGuidanceOutcome) => void;
   sendPlanGuidanceUpdate: (visitId: string, result: PlanGuidanceResult) => void;
-  sendAssessmentUpdate: (visitId: string, assessmentContext: string) => void;
+  sendAssessmentUpdate: (visitId: string, assessmentContext: string, diagnosisComparison?: DiagnosisComparisonResult) => void;
   sendPatientProfileUpdate: (
     visitId: string,
     result: {
       patientSnapshot?: string;
       previousVisitSummary?: string;
-      timelineSummary?: string;
+      lastVisitSummary?: string;
     },
   ) => void;
   sendInvestigationGuidanceUpdate: (visitId: string, result: InvestigationGuidanceResult) => void;
@@ -336,12 +337,13 @@ export function usePostMessage(): UsePostMessageReturn {
   // Token is NOT included — same posture as sendDifferentialUpdate. Pure
   // reuse: `assessmentContext` is the exact already-validated
   // ASSESSMENT_CONTEXT text, not new content.
-  const sendAssessmentUpdate = useCallback((visitId: string, assessmentContext: string) => {
+  const sendAssessmentUpdate = useCallback((visitId: string, assessmentContext: string, diagnosisComparison?: DiagnosisComparisonResult) => {
     const msg: PluginAssessmentUpdateMessage = {
       type: MSG_PLUGIN_ASSESSMENT_UPDATE,
       pluginId: PLUGIN_ID,
       visitId,
       assessmentContext,
+      ...(diagnosisComparison ? { diagnosisComparison } : {}),
     };
     postToParent(msg);
   }, []);
@@ -356,7 +358,7 @@ export function usePostMessage(): UsePostMessageReturn {
       result: {
         patientSnapshot?: string;
         previousVisitSummary?: string;
-        timelineSummary?: string;
+        lastVisitSummary?: string;
       },
     ) => {
       const msg: PluginPatientProfileUpdateMessage = {

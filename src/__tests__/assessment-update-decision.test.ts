@@ -18,6 +18,8 @@ function makeDoneState(overrides: {
   assessmentText?: string;
 }): CopilotGenerateState {
   const data: CopilotData = {
+    diagnosisComparison: { ok: false, errorCode: "RESPONSE_EMPTY", errorMessage: "empty" },
+    lastVisitSummary: { ok: false, errorCode: "RESPONSE_EMPTY", errorMessage: "empty" },
     snapshot: OK_SECTION("snapshot"),
     previousVisits: OK_SECTION("previousVisits"),
     timeline: OK_SECTION("timeline"),
