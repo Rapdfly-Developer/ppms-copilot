@@ -1,11 +1,11 @@
 // Consolidated Copilot generation service.
 //
 // Replaces independent per-capability requests with a single AI call that
-// generates thirteen sections (snapshot, previousVisits, timeline,
-// attention, draftNote, followUp, differentialDiagnosis, medications,
-// investigations, assessmentContext, suggestedQuestions, planGuidance,
-// investigationGuidance) as a structured JSON response, using the shared
-// high/reasoning tier. EXAM_GUIDANCE and REFRACTIVE_GUIDANCE are NOT part of
+// generates eleven sections (timeline, attention, draftNote, followUp,
+// differentialDiagnosis, medications, investigations, assessmentContext,
+// suggestedQuestions, planGuidance, investigationGuidance) as a structured
+// JSON response, using the reasoning-tier model. PATIENT_SNAPSHOT and
+// PREVIOUS_VISIT_SUMMARY are not bundled: nothing in the Copilot renders them. EXAM_GUIDANCE and REFRACTIVE_GUIDANCE are NOT part of
 // this bundle — both are on-demand only, triggered from PPMS Core via their
 // own /api/copilot/stream requests (see CopilotApp.tsx's dedicated
 // useCopilotStream instances), since their source tabs are often empty at
@@ -14,24 +14,16 @@
 // EVIDENCE deltas, documented investigations) are already fetched for the
 // other sections regardless, so there's no equivalent empty-at-visit-open risk.
 //
-// DIAGNOSIS_COMPARISON and LAST_VISIT_SUMMARY are eager too, but are NOT part
-// of the single JSON bundle above — opening a visit costs the one bundled
-// call PLUS these two, issued in parallel via Promise.all immediately after.
-// They're split out because they must run at the fast/medium tier (an
-// explicit product decision — a narrow single-field judgment doesn't need
-// open-ended reasoning depth), and the bundle is one provider.complete() call
-// with one shared model/reasoningEffort for every key in it — there is no way
-// to give an individual JSON key its own tier within that single completion.
-// Each also gets its own narrower context text (current-visit-only for
-// DIAGNOSIS_COMPARISON, V1-only for LAST_VISIT_SUMMARY — see
-// context.diagnosisComparisonText/lastVisitText in context/builder.ts) rather
-// than the full shared context every bundled section reads from, so
-// LAST_VISIT_SUMMARY cannot see V0/older-visit data to leak by mistake, and
-// DIAGNOSIS_COMPARISON cannot see investigation results it isn't meant to
-// reason from. Net effect: this eager path costs 3 real AI calls per visit
-// open (1 bundle + 2 parallel), not 1 — a deliberate trade of the original
-// "exactly one call" design goal for per-field model-tier control and
-// stronger data isolation on these two fields specifically.
+// DIAGNOSIS_COMPARISON is eager too, but is NOT part of the single JSON
+// bundle above — opening a visit costs the one bundled call PLUS this one,
+// issued immediately after. It's split out because it must run at the
+// fast/medium tier (an explicit product decision — a narrow single-field
+// judgment doesn't need open-ended reasoning depth), and the bundle is one
+// provider.complete() call with one shared model/reasoningEffort for every
+// key in it. It also gets its own narrower, current-visit-only context text
+// (context.diagnosisComparisonText in context/builder.ts), so it cannot see
+// investigation results it isn't meant to reason from. Net effect: 2 real AI
+// calls per visit open (1 bundle + 1 comparison).
 //
 // Security invariants:
 //   - patientRef and visitId come from the decoded token ONLY — never from body.
@@ -83,9 +75,7 @@ function decodeToken(authorizationHeader: string | null): TokenRouting | null {
 
 // ── Section validation ────────────────────────────────────────────────────────
 
-const SECTION_CAPABILITIES: Record<Exclude<keyof CopilotData, "diagnosisComparison" | "lastVisitSummary">, Capability> = {
-  snapshot: "PATIENT_SNAPSHOT",
-  previousVisits: "PREVIOUS_VISIT_SUMMARY",
+const SECTION_CAPABILITIES: Record<Exclude<keyof CopilotData, "diagnosisComparison">, Capability> = {
   timeline: "TIMELINE_SUMMARY",
   attention: "IMPORTANT_CHANGES",
   draftNote: "NOTE_ASSISTANCE",
@@ -182,7 +172,7 @@ export async function generateCopilot(
     visitsIncluded: context.stats.visitsIncluded,
   });
 
-  // 4. Single AI call — all seven sections as structured JSON
+  // 4. Single AI call — all eleven bundled sections as structured JSON
   const systemPrompt = buildConsolidatedSystemPrompt();
   const userMessage = buildConsolidatedUserMessage(context.text);
 
@@ -339,12 +329,11 @@ export async function generateCopilot(
     }
   }
 
-  // These eager sections must actually use fast/medium, independently of the
-  // high/reasoning consolidated bundle. Reuse the fetched DTOs; V1's request
-  // contains no V0 or older visit data. Failures remain local to each section.
+  // DIAGNOSIS_COMPARISON runs on the fast model, independently of the
+  // reasoning-tier bundle, from the already-fetched current-visit DTO.
+  // A failure here stays local to this section.
   await Promise.all(([
     ["diagnosisComparison", "DIAGNOSIS_COMPARISON", context.diagnosisComparisonText],
-    ["lastVisitSummary", "LAST_VISIT_SUMMARY", context.lastVisitText],
   ] as const).map(async ([key, capability, scopedContext]) => {
     try {
       const config = CAPABILITY_CONFIG[capability];
@@ -450,8 +439,6 @@ export async function generateCopilot(
   });
 
   const data: CopilotData = {
-    snapshot: sections.snapshot ?? errorSection("INTERNAL_ERROR"),
-    previousVisits: sections.previousVisits ?? errorSection("INTERNAL_ERROR"),
     timeline: sections.timeline ?? errorSection("INTERNAL_ERROR"),
     attention: sections.attention ?? errorSection("INTERNAL_ERROR"),
     draftNote: sections.draftNote ?? errorSection("INTERNAL_ERROR"),
@@ -464,7 +451,6 @@ export async function generateCopilot(
     planGuidance: sections.planGuidance ?? errorSection("INTERNAL_ERROR"),
     investigationGuidance: sections.investigationGuidance ?? errorSection("INTERNAL_ERROR"),
     diagnosisComparison: sections.diagnosisComparison ?? errorSection("INTERNAL_ERROR"),
-    lastVisitSummary: sections.lastVisitSummary ?? errorSection("INTERNAL_ERROR"),
   };
 
   const meta: GenerateMeta = {

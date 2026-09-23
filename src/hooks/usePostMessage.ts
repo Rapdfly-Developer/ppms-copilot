@@ -27,7 +27,6 @@ import {
   MSG_PLUGIN_REFRACTIVE_GUIDANCE_RESULT,
   MSG_PLUGIN_PLAN_GUIDANCE_UPDATE,
   MSG_PLUGIN_ASSESSMENT_UPDATE,
-  MSG_PLUGIN_PATIENT_PROFILE_UPDATE,
   MSG_PLUGIN_INVESTIGATION_GUIDANCE_UPDATE,
 } from "@/lib/constants";
 import {
@@ -51,7 +50,6 @@ import type {
   PluginRefractiveGuidanceResultMessage,
   PluginPlanGuidanceUpdateMessage,
   PluginAssessmentUpdateMessage,
-  PluginPatientProfileUpdateMessage,
   PluginInvestigationGuidanceUpdateMessage,
 } from "@/postmessage/types";
 
@@ -98,14 +96,6 @@ export interface UsePostMessageReturn {
   sendRefractiveGuidanceResult: (visitId: string, result: RefractiveGuidanceOutcome) => void;
   sendPlanGuidanceUpdate: (visitId: string, result: PlanGuidanceResult) => void;
   sendAssessmentUpdate: (visitId: string, assessmentContext: string, diagnosisComparison?: DiagnosisComparisonResult) => void;
-  sendPatientProfileUpdate: (
-    visitId: string,
-    result: {
-      patientSnapshot?: string;
-      previousVisitSummary?: string;
-      lastVisitSummary?: string;
-    },
-  ) => void;
   sendInvestigationGuidanceUpdate: (visitId: string, result: InvestigationGuidanceResult) => void;
 }
 
@@ -348,30 +338,6 @@ export function usePostMessage(): UsePostMessageReturn {
     postToParent(msg);
   }, []);
 
-  // Token is NOT included — same posture as sendDifferentialUpdate. Pure
-  // reuse: each field is the exact already-validated section text; fields
-  // are independently optional, matching decidePatientProfileUpdate's
-  // "omit rather than show broken" per-section behavior.
-  const sendPatientProfileUpdate = useCallback(
-    (
-      visitId: string,
-      result: {
-        patientSnapshot?: string;
-        previousVisitSummary?: string;
-        lastVisitSummary?: string;
-      },
-    ) => {
-      const msg: PluginPatientProfileUpdateMessage = {
-        type: MSG_PLUGIN_PATIENT_PROFILE_UPDATE,
-        pluginId: PLUGIN_ID,
-        visitId,
-        ...result,
-      };
-      postToParent(msg);
-    },
-    [],
-  );
-
   // Token is NOT included — same posture as sendDifferentialUpdate/
   // sendPlanGuidanceUpdate. Sent once per successful consolidated generation
   // (and again after Regenerate) once investigationGuidance validates
@@ -403,7 +369,6 @@ export function usePostMessage(): UsePostMessageReturn {
     sendRefractiveGuidanceResult,
     sendPlanGuidanceUpdate,
     sendAssessmentUpdate,
-    sendPatientProfileUpdate,
     sendInvestigationGuidanceUpdate,
   };
 }

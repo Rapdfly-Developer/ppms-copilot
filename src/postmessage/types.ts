@@ -21,7 +21,6 @@ import {
   MSG_PLUGIN_REFRACTIVE_GUIDANCE_RESULT,
   MSG_PLUGIN_PLAN_GUIDANCE_UPDATE,
   MSG_PLUGIN_ASSESSMENT_UPDATE,
-  MSG_PLUGIN_PATIENT_PROFILE_UPDATE,
   MSG_PLUGIN_INVESTIGATION_GUIDANCE_UPDATE,
 } from "@/lib/constants";
 import type {
@@ -194,22 +193,6 @@ export type PluginAssessmentUpdateMessage = {
 };
 
 // Sent once per successful consolidated generation (and again after
-// Regenerate), carrying whichever of the three underlying sections validated
-// successfully this generation — each field is independently optional
-// ("omit rather than show broken", same as PlanGuidanceResult.followUpSummary).
-// These are the exact validated
-// PATIENT_SNAPSHOT / PREVIOUS_VISIT_SUMMARY / LAST_VISIT_SUMMARY texts already
-// shown in the Copilot's own tabs.
-export type PluginPatientProfileUpdateMessage = {
-  type: typeof MSG_PLUGIN_PATIENT_PROFILE_UPDATE;
-  pluginId: typeof PLUGIN_ID;
-  visitId: string;
-  patientSnapshot?: string;
-  previousVisitSummary?: string;
-  lastVisitSummary?: string;
-};
-
-// Sent once per successful consolidated generation (and again after
 // Regenerate) once investigationGuidance validates successfully — same
 // no-token, no-PHI-beyond-what's-already-sent posture as
 // PluginPlanGuidanceUpdateMessage. `result` holds the same
@@ -232,5 +215,4 @@ export type OutboundPluginMessage =
   | PluginRefractiveGuidanceResultMessage
   | PluginPlanGuidanceUpdateMessage
   | PluginAssessmentUpdateMessage
-  | PluginPatientProfileUpdateMessage
   | PluginInvestigationGuidanceUpdateMessage;

@@ -34,7 +34,6 @@ const TAB_LABELS: Partial<Record<Capability, string>> = {
   PLAN_GUIDANCE:          "Plan Guidance",
   INVESTIGATION_GUIDANCE: "Investigation Guidance",
   DIAGNOSIS_COMPARISON: "Plausibility",
-  LAST_VISIT_SUMMARY: "Last Visit",
 };
 
 interface CapabilitySelectorProps {

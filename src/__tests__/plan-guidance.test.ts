@@ -71,8 +71,6 @@ async function generate(): Promise<GenerateResponse> {
 }
 
 const SAFE_OTHER_SECTIONS = {
-  snapshot: "Documented and stable; no acute findings reported at this visit.",
-  previousVisits: "Documented history consistent with prior visits; no new findings.",
   timeline: "Documented visit history spans multiple prior encounters.",
   attention: "No documented changes requiring attention at this time.",
   draftNote:
@@ -428,8 +426,6 @@ describe("PLAN_GUIDANCE capability (consolidated path)", () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.data.planGuidance.ok).toBe(false);
-      expect(result.data.snapshot.ok).toBe(true);
-      expect(result.data.previousVisits.ok).toBe(true);
       expect(result.data.differentialDiagnosis.ok).toBe(true);
       expect(result.data.medications.ok).toBe(true);
       expect(result.data.suggestedQuestions.ok).toBe(true);

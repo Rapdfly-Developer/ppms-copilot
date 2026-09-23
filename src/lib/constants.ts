@@ -65,15 +65,6 @@ export const MSG_PLUGIN_PLAN_GUIDANCE_UPDATE = "PLUGIN_PLAN_GUIDANCE_UPDATE" as 
 export const MSG_PLUGIN_ASSESSMENT_UPDATE = "PLUGIN_ASSESSMENT_UPDATE" as const;
 
 // Sent once per successful consolidated generation (and again after
-// Regenerate), carrying whichever of PATIENT_SNAPSHOT / PREVIOUS_VISIT_SUMMARY
-// / TIMELINE_SUMMARY validated successfully this generation — each field is
-// individually optional, so one failed section never blocks the other two.
-// Same pure-reuse posture: no new AI call, these are the exact section texts
-// already shown in the Copilot's own tabs. PPMS Core renders the three as
-// sub-tabs within one Patient Profile card outside this iframe.
-export const MSG_PLUGIN_PATIENT_PROFILE_UPDATE = "PLUGIN_PATIENT_PROFILE_UPDATE" as const;
-
-// Sent once per successful consolidated generation (and again after
 // Regenerate) once investigationGuidance validates successfully — same eager
 // pattern as MSG_PLUGIN_PLAN_GUIDANCE_UPDATE. Carries the structured result
 // so PPMS Core can render a persistent Investigation Guidance card outside

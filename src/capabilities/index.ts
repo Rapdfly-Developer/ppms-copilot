@@ -20,7 +20,6 @@ export const CAPABILITIES = {
   PLAN_GUIDANCE: "PLAN_GUIDANCE",
   INVESTIGATION_GUIDANCE: "INVESTIGATION_GUIDANCE",
   DIAGNOSIS_COMPARISON: "DIAGNOSIS_COMPARISON",
-  LAST_VISIT_SUMMARY: "LAST_VISIT_SUMMARY",
   QUESTION: "QUESTION",
 } as const;
 
@@ -289,23 +288,6 @@ export const CAPABILITY_CONFIG: Record<Capability, CapabilityConfig> = {
     producesDraft: false,
     // fast/medium, not high/reasoning: a narrow single-field judgment doesn't
     // need the deeper reasoning tier open-ended differential reasoning does.
-    reasoningEffort: "medium",
-    modelTier: "fast",
-  },
-  LAST_VISIT_SUMMARY: {
-    label: "Last Visit Summary",
-    description: "Focused summary of specifically the single most recent previous visit (V1), for the Patient Profile card",
-    // visitLimit 1 + visitHistory (which excludes the current visit) means
-    // exactly V1 — the single most recent previous visit — is fetched, the
-    // same underlying data PREVIOUS_VISIT_SUMMARY already reads, just
-    // narrowed to one visit instead of three.
-    includes: { demographics: true, currentVisit: false, visitHistory: true, appointments: false, timeline: false },
-    visitLimit: 1,
-    // 1300: a live run used all of 900 (hidden reasoning tokens count too)
-    // and was truncated.
-    maxTokens: 1300,
-    permission: "ai.copilot.summarize",
-    producesDraft: false,
     reasoningEffort: "medium",
     modelTier: "fast",
   },

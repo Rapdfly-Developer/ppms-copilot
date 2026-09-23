@@ -162,8 +162,6 @@ export type SectionOutcome =
   | { ok: false; errorCode: string; errorMessage: string };
 
 export type CopilotData = {
-  snapshot: SectionOutcome;
-  previousVisits: SectionOutcome;
   timeline: SectionOutcome;
   attention: SectionOutcome;
   draftNote: SectionOutcome;
@@ -176,7 +174,6 @@ export type CopilotData = {
   planGuidance: SectionOutcome;
   investigationGuidance: SectionOutcome;
   diagnosisComparison: SectionOutcome;
-  lastVisitSummary: SectionOutcome;
 };
 
 export type CopilotGenerateState =
@@ -203,7 +200,6 @@ export type Capability =
   | "PLAN_GUIDANCE"
   | "INVESTIGATION_GUIDANCE"
   | "DIAGNOSIS_COMPARISON"
-  | "LAST_VISIT_SUMMARY"
   | "QUESTION";
 
 // Token stored only in memory — never in localStorage or cookies.

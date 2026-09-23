@@ -9,9 +9,13 @@
 //   - 90-second hard timeout (consolidated call is larger than per-tab stream)
 //   - Regenerate bypasses cache and issues exactly one new request
 //   - Cache is keyed by visitId and cleared automatically when visitId changes
+//   - A completed bundle is also kept in this iframe's sessionStorage (see
+//     lib/bundle-cache.ts), so a page reload's PPMS_INIT for the same visit
+//     reuses it instead of re-running the AI call
 
 import { useState, useRef, useCallback } from "react";
 import { COPILOT_GENERATE_PATH } from "@/lib/constants";
+import { readCachedBundle, writeCachedBundle, clearCachedBundle } from "@/lib/bundle-cache";
 import type {
   CopilotGenerateState,
   CopilotData,
@@ -93,8 +97,6 @@ export function useCopilotGenerate(): UseCopilotGenerateReturn {
       const newState: DoneState = {
         status: "done",
         data: {
-          snapshot: r.snapshot as SectionOutcome,
-          previousVisits: r.previousVisits as SectionOutcome,
           timeline: r.timeline as SectionOutcome,
           attention: r.attention as SectionOutcome,
           draftNote: r.draftNote as SectionOutcome,
@@ -107,12 +109,12 @@ export function useCopilotGenerate(): UseCopilotGenerateReturn {
           planGuidance: r.planGuidance as SectionOutcome,
           investigationGuidance: r.investigationGuidance as SectionOutcome,
           diagnosisComparison: r.diagnosisComparison as SectionOutcome,
-          lastVisitSummary: r.lastVisitSummary as SectionOutcome,
         } satisfies CopilotData,
         meta: (r.meta ?? {}) as Record<string, unknown>,
       };
 
       cacheRef.current.set(visitId, newState);
+      writeCachedBundle(visitId, newState);
       setStateSafe(newState);
     } catch (err: unknown) {
       if (ctrl.signal.aborted) {
@@ -139,9 +141,11 @@ export function useCopilotGenerate(): UseCopilotGenerateReturn {
 
   const generate = useCallback(
     (token: string, visitId: string): void => {
-      // Cache hit — serve immediately, no API call
-      const hit = cacheRef.current.get(visitId);
+      // Cache hit (in memory, or sessionStorage after a page reload) —
+      // serve immediately, no API call
+      const hit = cacheRef.current.get(visitId) ?? readCachedBundle(visitId);
       if (hit) {
+        cacheRef.current.set(visitId, hit);
         abortRef.current?.abort();
         setState(hit);
         return;
@@ -157,8 +161,9 @@ export function useCopilotGenerate(): UseCopilotGenerateReturn {
 
   const regenerate = useCallback(
     (token: string, visitId: string): void => {
-      // Bypass cache — fresh request for all seven sections
+      // Bypass both caches — fresh request for every section
       cacheRef.current.delete(visitId);
+      clearCachedBundle(visitId);
       void doFetch(token, visitId);
     },
     [doFetch],

@@ -5,7 +5,6 @@ import { setProvider, resetProvider } from "@/ai";
 import { CAPABILITY_CONFIG } from "@/capabilities";
 import { getCopilotFastModel, getCopilotReasoningModel } from "@/lib/env";
 import { decideAssessmentUpdate } from "@/lib/assessment-update";
-import { decidePatientProfileUpdate } from "@/lib/patient-profile-update";
 import * as ppms from "@/lib/ppms-client";
 import type { AIProvider, AiRequest } from "@/ai/provider";
 import { FIXTURE_PATIENT, FIXTURE_VISIT_CURRENT, FIXTURE_VISIT_PREVIOUS, FIXTURE_TOKEN } from "./fixtures/patient";
@@ -15,7 +14,6 @@ const omitted = "[Plausibility]\nNot applicable — no documented diagnosis for 
 const reason = "Documented blurred vision\nis consistent with lens opacity.";
 const ddx = `**Cataract**\n${reason}\nConfidence: Moderate\nSource: V0`;
 const emptyDdx = "The documented record does not contain sufficient findings to support any diagnostic considerations at this time.";
-const summary = "## Visit Summary (V1)\n- **Chief complaint:** Previous blurred vision documented.";
 
 describe("Plausibility validator", () => {
   it.each(["Plausible", "Worth reviewing"])("accepts %s", (label) => {
@@ -63,7 +61,7 @@ afterEach(() => { vi.restoreAllMocks(); resetProvider(); });
 // shared JSON output spec — it no longer sends responseFormat.
 const isBundle = (request: AiRequest) => request.systemPrompt.includes("OUTPUT FORMAT REQUIREMENT");
 
-function provider(comparison = plausible, differential = ddx, failSummary = false) {
+function provider(comparison = plausible, differential = ddx) {
   const calls: AiRequest[] = [];
   const mock: AIProvider = {
     id: "mock", model: "mock", isConfigured: () => true,
@@ -72,9 +70,7 @@ function provider(comparison = plausible, differential = ddx, failSummary = fals
       const text = isBundle(request) ? JSON.stringify({
         differentialDiagnosis: differential,
         assessmentContext: "The documented diagnoses are recorded for clinician review.",
-        snapshot: "The patient has documented clinical history.",
-        previousVisits: "Prior visits document the clinical history.",
-      }) : request.systemPrompt.includes("[Plausibility]") ? comparison : failSummary ? "" : summary;
+      }) : comparison;
       return { text, model: request.modelOverride!, provider: "mock", usage: { inputTokens: 1, outputTokens: 1 }, stopReason: "end_turn" };
     },
     async *stream() { throw new Error("Not used"); },
@@ -89,7 +85,9 @@ describe("VI(g)/VI(h) eager generation integration", () => {
     const result = await generateCopilot(`Bearer ${FIXTURE_TOKEN}`);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(calls).toHaveLength(3);
+    // Visit open = the bundle plus DIAGNOSIS_COMPARISON only.
+    expect(calls).toHaveLength(2);
+    expect(calls.filter((call) => !isBundle(call)).map((call) => call.systemPrompt.includes("[Plausibility]"))).toEqual([true]);
     expect(calls.filter(isBundle).map((call) => call.modelOverride)).toEqual([getCopilotReasoningModel()]);
     for (const call of calls.filter((call) => !isBundle(call))) {
       expect(call.modelOverride).toBe(getCopilotFastModel());
@@ -106,7 +104,7 @@ describe("VI(g)/VI(h) eager generation integration", () => {
     expect(decision).toMatchObject({ send: true, diagnosisComparison: { differentialDiagnosisReasoning: [{ name: "Cataract", reason }] } });
     expect(decideAssessmentUpdate(state, result.meta.requestId)).toEqual({ send: false });
     expect(decideAssessmentUpdate({ ...state, meta: { requestId: "regenerated" } }, result.meta.requestId).send).toBe(true);
-    expect(result.meta.inputTokens).toBe(3);
+    expect(result.meta.inputTokens).toBe(2);
   });
   it.each([emptyDdx, "Malformed differential response"])("keeps Plausibility without DDx citations", async (differential) => {
     provider(plausible, differential);
@@ -133,37 +131,5 @@ describe("VI(g)/VI(h) eager generation integration", () => {
     const decision = decideAssessmentUpdate({ status: "done", data: result.data, meta: result.meta }, null);
     expect(decision.send).toBe(true);
     expect(decision).not.toHaveProperty("diagnosisComparison");
-  });
-  it("sends only the newest prior visit to LAST_VISIT_SUMMARY, excluding current/older visits", async () => {
-    vi.mocked(ppms.getVisit).mockResolvedValue({ ...FIXTURE_VISIT_CURRENT, chiefComplaint: "CURRENT_SENTINEL" });
-    vi.mocked(ppms.getVisits).mockResolvedValue([
-      { ...FIXTURE_VISIT_PREVIOUS, visitId: "older", date: "2023-01-01", chiefComplaint: "OLDER_SENTINEL" },
-      { ...FIXTURE_VISIT_CURRENT, chiefComplaint: "CURRENT_SENTINEL" },
-      { ...FIXTURE_VISIT_PREVIOUS, date: "2024-01-01", chiefComplaint: "V1_SENTINEL" },
-    ]);
-    const calls = provider();
-    const result = await generateCopilot(`Bearer ${FIXTURE_TOKEN}`);
-    const call = calls.find((request) => request.systemPrompt.includes("Visit Summary (V1"))!;
-    expect(call.messages[0].content).toContain("V1_SENTINEL");
-    expect(call.messages[0].content).not.toMatch(/CURRENT_SENTINEL|OLDER_SENTINEL/);
-    if (!result.ok) throw new Error("Generation failed");
-    const decision = decidePatientProfileUpdate({ status: "done", data: result.data, meta: result.meta }, null);
-    expect(decision).toMatchObject({ send: true, lastVisitSummary: summary });
-    expect(decision).not.toHaveProperty("timelineSummary");
-  });
-  it("provides explicit no-prior-visit context", async () => {
-    vi.mocked(ppms.getVisits).mockResolvedValue([FIXTURE_VISIT_CURRENT]);
-    const calls = provider();
-    await generateCopilot(`Bearer ${FIXTURE_TOKEN}`);
-    const call = calls.find((request) => request.systemPrompt.includes("Visit Summary (V1"))!;
-    expect(call.messages[0].content).toContain("No previous visit documented.");
-  });
-  it("isolates a failed last-visit summary from the other profile fields", async () => {
-    provider(plausible, ddx, true);
-    const result = await generateCopilot(`Bearer ${FIXTURE_TOKEN}`);
-    if (!result.ok) throw new Error("Generation failed");
-    const decision = decidePatientProfileUpdate({ status: "done", data: result.data, meta: result.meta }, null);
-    expect(decision).toMatchObject({ send: true, patientSnapshot: expect.any(String), previousVisitSummary: expect.any(String) });
-    expect(decision).not.toHaveProperty("lastVisitSummary");
   });
 });
