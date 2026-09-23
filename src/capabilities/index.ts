@@ -207,7 +207,10 @@ export const CAPABILITY_CONFIG: Record<Capability, CapabilityConfig> = {
     maxTokens: 1400,
     permission: "ai.copilot.draft",
     producesDraft: false,
-    reasoningEffort: "high",
+    // medium, not high: on Groq's gpt-oss models "high" maps to the most
+    // expensive reasoning_effort, and the hidden reasoning tokens used up the
+    // whole maxTokens budget live, leaving empty output (RESPONSE_EMPTY).
+    reasoningEffort: "medium",
     modelTier: "reasoning",
   },
   REFRACTIVE_GUIDANCE: {
@@ -225,7 +228,10 @@ export const CAPABILITY_CONFIG: Record<Capability, CapabilityConfig> = {
     maxTokens: 1600,
     permission: "ai.copilot.draft",
     producesDraft: false,
-    reasoningEffort: "high",
+    // medium, not high: on Groq's gpt-oss models "high" maps to the most
+    // expensive reasoning_effort, and the hidden reasoning tokens used up the
+    // whole maxTokens budget live, leaving empty output (RESPONSE_EMPTY).
+    reasoningEffort: "medium",
     modelTier: "reasoning",
   },
   PLAN_GUIDANCE: {
