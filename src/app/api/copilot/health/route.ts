@@ -29,22 +29,49 @@ export async function GET(): Promise<Response> {
     }, 503);
   }
 
-  // Minimal test call — ask for a one-word answer to keep cost/latency low.
+  // Two tests in parallel:
+  //   A) basic call (no reasoningEffort) — proves API key + model are valid
+  //   B) production-like call (reasoningEffort: "high", larger maxTokens) — proves
+  //      the actual copilot generation parameters work. This is what was failing.
   try {
-    const result = await provider.complete({
-      systemPrompt: "You are a test assistant. Respond with exactly one word.",
-      messages: [{ role: "user", content: "Say: OK" }],
-      maxTokens: 10,
-      modelOverride: reasoningModel,
-    });
+    const [basicResult, prodResult] = await Promise.allSettled([
+      provider.complete({
+        systemPrompt: "You are a test assistant. Respond with exactly one word.",
+        messages: [{ role: "user", content: "Say: OK" }],
+        maxTokens: 10,
+        modelOverride: reasoningModel,
+      }),
+      provider.complete({
+        systemPrompt: "Return ONLY a valid JSON object with one key: {\"ok\": true}",
+        messages: [{ role: "user", content: "Return the JSON object now." }],
+        maxTokens: 500,
+        reasoningEffort: "high",
+        modelOverride: reasoningModel,
+      }),
+    ]);
+
+    const basicOk = basicResult.status === "fulfilled";
+    const prodOk = prodResult.status === "fulfilled";
+
     return json({
-      ok: true,
+      ok: basicOk && prodOk,
       provider: aiProvider,
       reasoningModel,
       fastModel,
-      response: result.text.trim(),
-      inputTokens: result.usage.inputTokens,
-      outputTokens: result.usage.outputTokens,
+      basic: {
+        ok: basicOk,
+        response: basicOk ? basicResult.value.text.trim() : undefined,
+        error: !basicOk ? String((basicResult as PromiseRejectedResult).reason) : undefined,
+        inputTokens: basicOk ? basicResult.value.usage.inputTokens : undefined,
+        outputTokens: basicOk ? basicResult.value.usage.outputTokens : undefined,
+      },
+      production: {
+        ok: prodOk,
+        response: prodOk ? prodResult.value.text.trim().slice(0, 200) : undefined,
+        error: !prodOk ? String((prodResult as PromiseRejectedResult).reason) : undefined,
+        inputTokens: prodOk ? prodResult.value.usage.inputTokens : undefined,
+        outputTokens: prodOk ? prodResult.value.usage.outputTokens : undefined,
+      },
     });
   } catch (err) {
     const code = err instanceof AiProviderError ? err.code : "UNKNOWN";
