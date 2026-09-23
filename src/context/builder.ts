@@ -423,8 +423,12 @@ export async function buildConsolidatedContext(args: {
     // Fetch everything needed across all 7 consolidated capabilities at once:
     //   demographics: always
     //   currentVisit: PATIENT_SNAPSHOT, IMPORTANT_CHANGES, NOTE_ASSISTANCE, FOLLOW_UP_SUMMARY, DIFFERENTIAL_DIAGNOSIS
-    //   visitHistory(6): IMPORTANT_CHANGES needs 6; others (including DIFFERENTIAL_DIAGNOSIS's 3) need fewer — use the max
-    //   appointments(10): TIMELINE_SUMMARY and FOLLOW_UP_SUMMARY
+    //   visitHistory(3): capped at 3 (down from 6) to keep the consolidated
+    //     request under the 8 000-token Groq free-tier TPM limit — the full
+    //     8720-token request was causing HTTP 413 errors. 3 history visits is
+    //     sufficient for IMPORTANT_CHANGES and PLAN_GUIDANCE; the clinical
+    //     benefit of visits 4-6 does not outweigh "AI service unavailable".
+    //   appointments(5): capped at 5 (down from 10) for the same reason.
     //   timeline: TIMELINE_SUMMARY
     // DIFFERENTIAL_DIAGNOSIS's own narrower data needs (see CAPABILITY_CONFIG)
     // are already a subset of this superset fetch, so no extra fetch is needed
@@ -432,8 +436,8 @@ export async function buildConsolidatedContext(args: {
     const [patient, currentVisit, visitHistory, appointments, timeline] = await Promise.all([
       getPatient(token, patientRef),
       getVisit(token, patientRef, visitId),
-      getVisits(token, patientRef, 6),
-      getAppointments(token, patientRef, 10),
+      getVisits(token, patientRef, 3),
+      getAppointments(token, patientRef, 5),
       getTimeline(token, patientRef),
     ]);
     fetched = { patient, currentVisit, visitHistory, appointments, timeline };

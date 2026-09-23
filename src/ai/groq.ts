@@ -19,6 +19,9 @@ const HTTP_ERROR_CODES: Record<number, { code: string; retryable: boolean }> = {
   401: { code: "AI_AUTH_FAILED",    retryable: false },
   403: { code: "AI_AUTH_FAILED",    retryable: false },
   404: { code: "AI_NOT_CONFIGURED", retryable: false },
+  // 413 = Groq "Request too large" — TPM limit exceeded for this model/tier.
+  // Not retryable: the same request will fail again immediately.
+  413: { code: "AI_UNAVAILABLE",    retryable: false },
   429: { code: "AI_RATE_LIMITED",   retryable: true  },
   500: { code: "AI_UNAVAILABLE",    retryable: true  },
   503: { code: "AI_UNAVAILABLE",    retryable: true  },
