@@ -71,30 +71,35 @@ export class GroqProvider implements AIProvider {
     // native reasoning_effort parameter and use max_completion_tokens instead
     // of max_tokens, per Groq's reasoning API docs. Regular chat models use the
     // original max_tokens + temperature approach.
+    //
+    // We build params as `any` so TypeScript doesn't reject Groq-specific
+    // fields (max_completion_tokens, reasoning_effort) that aren't in the
+    // openai SDK's type definitions, then cast the response to ChatCompletion
+    // (the non-streaming overload return type) since stream is always false.
     const isGroqReasoningModel = model.includes("gpt-oss");
     const temperature = req.temperature ?? 0.3;
     const start = Date.now();
     try {
-      const response = await this.client.chat.completions.create({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const params: any = {
         model,
-        ...(isGroqReasoningModel
-          ? {
-              max_completion_tokens: req.maxTokens,
-              ...(req.reasoningEffort ? { reasoning_effort: req.reasoningEffort } : {}),
-            }
-          : {
-              max_tokens: req.maxTokens,
-              temperature: req.reasoningEffort === "high" ? 0.1 : temperature,
-            }),
         messages: [
           { role: "system", content: req.systemPrompt },
           ...req.messages.map((m) => ({ role: m.role, content: m.content })),
         ],
         stream: false,
-        ...(req.responseFormat === "json_object"
-          ? { response_format: { type: "json_object" as const } }
-          : {}),
-      } as Parameters<typeof this.client.chat.completions.create>[0]);
+      };
+      if (isGroqReasoningModel) {
+        params.max_completion_tokens = req.maxTokens;
+        if (req.reasoningEffort) params.reasoning_effort = req.reasoningEffort;
+      } else {
+        params.max_tokens = req.maxTokens;
+        params.temperature = req.reasoningEffort === "high" ? 0.1 : temperature;
+      }
+      if (req.responseFormat === "json_object") {
+        params.response_format = { type: "json_object" };
+      }
+      const response = (await this.client.chat.completions.create(params)) as OpenAI.ChatCompletion;
 
       const choice = response.choices[0];
       const text = choice?.message?.content ?? "";
@@ -132,28 +137,31 @@ export class GroqProvider implements AIProvider {
     // Retry on 429 (rate limit) before any frames are yielded.
     // Groq 429s always come at connection time, never mid-stream.
     const RETRY_DELAYS_MS = [3000, 6000];
-    let streamResponse: Awaited<ReturnType<typeof this.client.chat.completions.create>> | null = null;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let streamResponse: AsyncIterable<OpenAI.ChatCompletionChunk> | null = null;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const streamParams: any = {
+      model,
+      messages: [
+        { role: "system", content: req.systemPrompt },
+        ...req.messages.map((m) => ({ role: m.role, content: m.content })),
+      ],
+      stream: true,
+      stream_options: { include_usage: true },
+    };
+    if (isGroqReasoningModel) {
+      streamParams.max_completion_tokens = req.maxTokens;
+      if (req.reasoningEffort) streamParams.reasoning_effort = req.reasoningEffort;
+    } else {
+      streamParams.max_tokens = req.maxTokens;
+      streamParams.temperature = req.reasoningEffort === "high" ? 0.1 : temperature;
+    }
 
     for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
       try {
-        streamResponse = await this.client.chat.completions.create({
-          model,
-          ...(isGroqReasoningModel
-            ? {
-                max_completion_tokens: req.maxTokens,
-                ...(req.reasoningEffort ? { reasoning_effort: req.reasoningEffort } : {}),
-              }
-            : {
-                max_tokens: req.maxTokens,
-                temperature: req.reasoningEffort === "high" ? 0.1 : temperature,
-              }),
-          messages: [
-            { role: "system", content: req.systemPrompt },
-            ...req.messages.map((m) => ({ role: m.role, content: m.content })),
-          ],
-          stream: true,
-          stream_options: { include_usage: true },
-        } as Parameters<typeof this.client.chat.completions.create>[0]);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        streamResponse = (await this.client.chat.completions.create(streamParams)) as any;
         break; // connection established — proceed to iterate
       } catch (err) {
         const { code } = this.classifyError(err, model);
