@@ -67,13 +67,25 @@ export class GroqProvider implements AIProvider {
     }
 
     const model = req.modelOverride ?? this.model;
-    const temperature = req.reasoningEffort === "high" ? 0.1 : (req.temperature ?? 0.3);
+    // GPT-OSS reasoning models (gpt-oss-20b, gpt-oss-120b) support Groq's
+    // native reasoning_effort parameter and use max_completion_tokens instead
+    // of max_tokens, per Groq's reasoning API docs. Regular chat models use the
+    // original max_tokens + temperature approach.
+    const isGroqReasoningModel = model.includes("gpt-oss");
+    const temperature = req.temperature ?? 0.3;
     const start = Date.now();
     try {
       const response = await this.client.chat.completions.create({
         model,
-        max_tokens: req.maxTokens,
-        temperature,
+        ...(isGroqReasoningModel
+          ? {
+              max_completion_tokens: req.maxTokens,
+              ...(req.reasoningEffort ? { reasoning_effort: req.reasoningEffort } : {}),
+            }
+          : {
+              max_tokens: req.maxTokens,
+              temperature: req.reasoningEffort === "high" ? 0.1 : temperature,
+            }),
         messages: [
           { role: "system", content: req.systemPrompt },
           ...req.messages.map((m) => ({ role: m.role, content: m.content })),
@@ -82,7 +94,7 @@ export class GroqProvider implements AIProvider {
         ...(req.responseFormat === "json_object"
           ? { response_format: { type: "json_object" as const } }
           : {}),
-      });
+      } as Parameters<typeof this.client.chat.completions.create>[0]);
 
       const choice = response.choices[0];
       const text = choice?.message?.content ?? "";
@@ -102,7 +114,7 @@ export class GroqProvider implements AIProvider {
 
       return { text, model, provider: this.id, usage, stopReason };
     } catch (err) {
-      this.handleError(err, start);
+      this.handleError(err, start, model);
     }
   }
 
@@ -113,7 +125,8 @@ export class GroqProvider implements AIProvider {
     }
 
     const model = req.modelOverride ?? this.model;
-    const temperature = req.reasoningEffort === "high" ? 0.1 : (req.temperature ?? 0.3);
+    const isGroqReasoningModel = model.includes("gpt-oss");
+    const temperature = req.temperature ?? 0.3;
     const start = Date.now();
 
     // Retry on 429 (rate limit) before any frames are yielded.
@@ -125,18 +138,25 @@ export class GroqProvider implements AIProvider {
       try {
         streamResponse = await this.client.chat.completions.create({
           model,
-          max_tokens: req.maxTokens,
-          temperature,
+          ...(isGroqReasoningModel
+            ? {
+                max_completion_tokens: req.maxTokens,
+                ...(req.reasoningEffort ? { reasoning_effort: req.reasoningEffort } : {}),
+              }
+            : {
+                max_tokens: req.maxTokens,
+                temperature: req.reasoningEffort === "high" ? 0.1 : temperature,
+              }),
           messages: [
             { role: "system", content: req.systemPrompt },
             ...req.messages.map((m) => ({ role: m.role, content: m.content })),
           ],
           stream: true,
           stream_options: { include_usage: true },
-        });
+        } as Parameters<typeof this.client.chat.completions.create>[0]);
         break; // connection established — proceed to iterate
       } catch (err) {
-        const { code } = this.classifyError(err);
+        const { code } = this.classifyError(err, model);
         if (code === "AI_RATE_LIMITED" && attempt < RETRY_DELAYS_MS.length) {
           const delayMs = RETRY_DELAYS_MS[attempt];
           logger.info("groq_rate_limit_retry", { delayMs, model });
@@ -194,7 +214,7 @@ export class GroqProvider implements AIProvider {
         stopReason,
       };
     } catch (err) {
-      const { code } = this.classifyError(err);
+      const { code } = this.classifyError(err, model);
       logger.error("ai_stream_error", { code, durationMs: Date.now() - start });
       yield { type: "error", code, message: "AI stream failed" };
     }
@@ -202,14 +222,14 @@ export class GroqProvider implements AIProvider {
 
   // ── Private helpers ─────────────────────────────────────────────────────────
 
-  private classifyError(err: unknown): { code: string; retryable: boolean } {
+  private classifyError(err: unknown, model?: string): { code: string; retryable: boolean } {
     if (err instanceof OpenAI.APIConnectionTimeoutError) {
       return { code: "AI_TIMEOUT", retryable: true };
     }
     if (err instanceof OpenAI.APIError) {
       logger.error("groq_http_error", {
         status: err.status,
-        model:  this.model,
+        model:  model ?? this.model,
         reason: err.message,
       });
       if (err.status !== undefined && HTTP_ERROR_CODES[err.status]) {
@@ -223,8 +243,8 @@ export class GroqProvider implements AIProvider {
     return { code: "AI_UNAVAILABLE", retryable: false };
   }
 
-  private handleError(err: unknown, start: number): never {
-    const { code, retryable } = this.classifyError(err);
+  private handleError(err: unknown, start: number, model?: string): never {
+    const { code, retryable } = this.classifyError(err, model);
     logger.error("ai_complete_error", { code, durationMs: Date.now() - start });
     throw new AiProviderError(code, "AI request failed", retryable);
   }
