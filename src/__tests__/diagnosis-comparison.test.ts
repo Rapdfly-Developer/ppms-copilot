@@ -3,7 +3,7 @@ import { validateResponse } from "@/validation/response";
 import { generateCopilot } from "@/service/copilot-generate";
 import { setProvider, resetProvider } from "@/ai";
 import { CAPABILITY_CONFIG } from "@/capabilities";
-import { getCopilotFastModel } from "@/lib/env";
+import { getCopilotFastModel, getCopilotReasoningModel } from "@/lib/env";
 import { decideAssessmentUpdate } from "@/lib/assessment-update";
 import { decidePatientProfileUpdate } from "@/lib/patient-profile-update";
 import * as ppms from "@/lib/ppms-client";
@@ -59,13 +59,17 @@ beforeEach(() => {
 });
 afterEach(() => { vi.restoreAllMocks(); resetProvider(); });
 
+// The consolidated bundle is the only call whose system prompt carries the
+// shared JSON output spec — it no longer sends responseFormat.
+const isBundle = (request: AiRequest) => request.systemPrompt.includes("OUTPUT FORMAT REQUIREMENT");
+
 function provider(comparison = plausible, differential = ddx, failSummary = false) {
   const calls: AiRequest[] = [];
   const mock: AIProvider = {
     id: "mock", model: "mock", isConfigured: () => true,
     async complete(request) {
       calls.push(request);
-      const text = request.responseFormat ? JSON.stringify({
+      const text = isBundle(request) ? JSON.stringify({
         differentialDiagnosis: differential,
         assessmentContext: "The documented diagnoses are recorded for clinician review.",
         snapshot: "The patient has documented clinical history.",
@@ -86,10 +90,12 @@ describe("VI(g)/VI(h) eager generation integration", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(calls).toHaveLength(3);
-    for (const call of calls.filter((call) => !call.responseFormat)) {
+    expect(calls.filter(isBundle).map((call) => call.modelOverride)).toEqual([getCopilotReasoningModel()]);
+    for (const call of calls.filter((call) => !isBundle(call))) {
       expect(call.modelOverride).toBe(getCopilotFastModel());
       expect(call.reasoningEffort).toBe("medium");
     }
+    expect(getCopilotFastModel()).not.toBe(getCopilotReasoningModel());
     expect(CAPABILITY_CONFIG.DIAGNOSIS_COMPARISON.modelTier).toBe("fast");
     const section = result.data.diagnosisComparison;
     expect(section).toMatchObject({ ok: true, diagnosisComparisonResult: {

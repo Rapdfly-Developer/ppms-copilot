@@ -301,7 +301,9 @@ export const CAPABILITY_CONFIG: Record<Capability, CapabilityConfig> = {
     // narrowed to one visit instead of three.
     includes: { demographics: true, currentVisit: false, visitHistory: true, appointments: false, timeline: false },
     visitLimit: 1,
-    maxTokens: 900,
+    // 1300: a live run used all of 900 (hidden reasoning tokens count too)
+    // and was truncated.
+    maxTokens: 1300,
     permission: "ai.copilot.summarize",
     producesDraft: false,
     reasoningEffort: "medium",

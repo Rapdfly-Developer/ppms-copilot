@@ -218,7 +218,7 @@ export async function generateCopilot(
       // sum (700+1000+1200+1400+1400+1400+1400 = 8500, tuned for the old,
       // less verbose Llama defaults) to absorb this model's more verbose style.
       maxTokens: 12800,
-      reasoningEffort: "high",
+      reasoningEffort: "medium",
       modelOverride: model,
       // No responseFormat: openai/gpt-oss-120b is a reasoning model and does
       // not support json_object mode — sending it causes a 400. The system

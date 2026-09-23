@@ -61,20 +61,18 @@ export function getAiTimeoutMs(): number {
 }
 
 // Per-tier model selection — used by the service layer to route capabilities.
-// COPILOT_FAST_MODEL: quick summaries (snapshot, prev visits, timeline).
-// COPILOT_REASONING_MODEL: deep longitudinal analysis (attention, draft note, follow-up).
-// Both fall back to AI_MODEL (then to the provider default) when not set.
+// COPILOT_FAST_MODEL: the two parallel visit-open calls (diagnosis comparison,
+// last visit summary). COPILOT_REASONING_MODEL: the consolidated bundle.
+//
+// On Groq the two tiers deliberately default to DIFFERENT models and ignore
+// AI_MODEL: each model has its own 8000 tokens-per-minute budget, and a single
+// AI_MODEL value would put the bundle and the parallel calls in one bucket.
 export function getCopilotFastModel(): string {
-  return process.env.COPILOT_FAST_MODEL?.trim() || getAiModel();
+  if (process.env.COPILOT_FAST_MODEL?.trim()) return process.env.COPILOT_FAST_MODEL.trim();
+  return getAiProvider() === "anthropic" ? getAiModel() : "openai/gpt-oss-20b";
 }
 
-// Reasoning model defaults to openai/gpt-oss-120b — Groq's recommended
-// replacement after decommissioning the llama-3.1-8b-instant / llama-3.3-70b-versatile
-// models this app previously defaulted to (August 2026). Override with
-// COPILOT_REASONING_MODEL env var.
 export function getCopilotReasoningModel(): string {
   if (process.env.COPILOT_REASONING_MODEL?.trim()) return process.env.COPILOT_REASONING_MODEL.trim();
-  // If AI_MODEL is explicitly set, use it for both tiers
-  if (process.env.AI_MODEL?.trim()) return process.env.AI_MODEL.trim();
-  return getAiProvider() === "anthropic" ? "claude-opus-5" : "openai/gpt-oss-120b";
+  return getAiProvider() === "anthropic" ? getAiModel() : "openai/gpt-oss-120b";
 }

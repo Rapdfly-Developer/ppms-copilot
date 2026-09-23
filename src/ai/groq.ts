@@ -21,11 +21,24 @@ const HTTP_ERROR_CODES: Record<number, { code: string; retryable: boolean }> = {
   404: { code: "AI_NOT_CONFIGURED", retryable: false },
   // 413 = Groq "Request too large" — TPM limit exceeded for this model/tier.
   // Not retryable: the same request will fail again immediately.
-  413: { code: "AI_UNAVAILABLE",    retryable: false },
+  413: { code: "AI_REQUEST_TOO_LARGE", retryable: false },
   429: { code: "AI_RATE_LIMITED",   retryable: true  },
   500: { code: "AI_UNAVAILABLE",    retryable: true  },
   503: { code: "AI_UNAVAILABLE",    retryable: true  },
 };
+
+// A 429 is retried once when Groq's retry-after says the bucket refills within
+// this long; longer waits fail fast rather than leave the doctor waiting.
+const MAX_RATE_LIMIT_WAIT_MS = 20_000;
+
+function retryAfterMs(err: unknown): number | null {
+  if (!(err instanceof OpenAI.APIError) || err.status !== 429) return null;
+  const raw = err.headers?.get("retry-after");
+  const seconds = raw ? Number.parseFloat(raw) : NaN;
+  return Number.isFinite(seconds) && seconds >= 0 && seconds * 1000 <= MAX_RATE_LIMIT_WAIT_MS
+    ? Math.ceil(seconds * 1000)
+    : null;
+}
 
 function mapFinishReason(reason: string | null | undefined): string {
   switch (reason) {
@@ -102,7 +115,16 @@ export class GroqProvider implements AIProvider {
       if (req.responseFormat === "json_object") {
         params.response_format = { type: "json_object" };
       }
-      const response = (await this.client.chat.completions.create(params)) as OpenAI.ChatCompletion;
+      let response: OpenAI.ChatCompletion;
+      try {
+        response = (await this.client.chat.completions.create(params)) as OpenAI.ChatCompletion;
+      } catch (err) {
+        const wait = retryAfterMs(err);
+        if (wait === null) throw err;
+        logger.info("groq_rate_limit_retry", { delayMs: wait, model });
+        await new Promise((resolve) => setTimeout(resolve, wait));
+        response = (await this.client.chat.completions.create(params)) as OpenAI.ChatCompletion;
+      }
 
       const choice = response.choices[0];
       const text = choice?.message?.content ?? "";
