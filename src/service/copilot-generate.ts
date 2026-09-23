@@ -220,7 +220,11 @@ export async function generateCopilot(
       maxTokens: 12800,
       reasoningEffort: "high",
       modelOverride: model,
-      responseFormat: "json_object",
+      // No responseFormat: openai/gpt-oss-120b is a reasoning model and does
+      // not support json_object mode — sending it causes a 400. The system
+      // prompt already mandates "Return ONLY the JSON object" which is
+      // sufficient; extractJSON() below strips any code-fence wrapping just
+      // in case the model adds it anyway.
     });
     rawText = result.text;
     doneMeta = {
@@ -255,9 +259,20 @@ export async function generateCopilot(
   }
 
   // 5. Parse JSON response
+  // extractJSON: strip ```json ... ``` code fences that reasoning models
+  // sometimes add despite the "no code fence" instruction.
+  function extractJSON(text: string): string {
+    const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (fenced) return fenced[1].trim();
+    const start = text.indexOf("{");
+    const end = text.lastIndexOf("}");
+    if (start !== -1 && end > start) return text.slice(start, end + 1);
+    return text.trim();
+  }
+
   let parsed: Record<string, unknown>;
   try {
-    parsed = JSON.parse(rawText) as Record<string, unknown>;
+    parsed = JSON.parse(extractJSON(rawText)) as Record<string, unknown>;
   } catch {
     logger.error("generate_json_parse_failed", {
       requestId,
