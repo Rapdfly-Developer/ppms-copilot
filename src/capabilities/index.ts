@@ -126,7 +126,10 @@ export const CAPABILITY_CONFIG: Record<Capability, CapabilityConfig> = {
     description: "Structured summary for patient follow-up or referral",
     includes: { demographics: true, currentVisit: true, visitHistory: true, appointments: true, timeline: false },
     visitLimit: 3,
-    maxTokens: 1400,
+    // 1000 (was 1400): trimmed to three sections (current treatment, pending
+    // investigations, follow-up plan). Headroom kept for gpt-oss hidden
+    // reasoning tokens, which count against this cap.
+    maxTokens: 1000,
     permission: "ai.copilot.summarize",
     producesDraft: true,
     draftType: "follow_up_summary",

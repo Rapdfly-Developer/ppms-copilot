@@ -558,37 +558,15 @@ Use only documented information. Do not add, infer, or assume any clinical detai
 
   FOLLOW_UP_SUMMARY: `Task: Create a structured follow-up summary for this patient based on the documented record. This summary is for the treating doctor's review and is suitable for use as a follow-up letter or referral note after doctor confirmation.
 
-## Patient Profile
-- **Demographics:** [age and sex — no name or ID]
-- **Clinical category:** [as documented]
-- **Duration in care:** [from registration year to current date]
-
-## Documented Diagnoses
-For each active diagnosis:
-- **[Diagnosis]** ([laterality]) — [provisional / confirmed] (Source: [Vn date])
+Include ONLY these three sections, in this order:
 
 ## Current Treatment as Documented
-**Medications:**
-[Each documented medication:]
 - **[Drug name]:** [dosage] [frequency] via [route]
-
-**Non-pharmacological management:** [if documented; otherwise omit this line]
-
-## Documented Clinical Changes Since Previous Visit
-Use the STRUCTURED CLINICAL FINDINGS and CLINICAL EVIDENCE sections:
-- [List medication changes with Finding references and visit source citations]
-- [List diagnosis changes with Finding references and visit source citations]
-- [List vital sign changes if documented, with pre-computed values]
-
-If no changes are documented: "No changes documented between the two most recent recorded visits."
+- **Non-pharmacological management:** [if documented; otherwise omit this line]
 
 ## Pending Investigations
 Investigations ordered but not yet completed (as documented):
 - **[Test name]** ([category], [priority]) — ordered at V0 [date]
-
-## Recent Clinical Context
-- **Most recent visit (V0 [date]):** [chief complaint and key findings as documented]
-- **Previous visit (V1 [date]):** [key comparison points as documented]
 
 ## Follow-up Plan as Documented
 - **Next follow-up:** [date as documented]
@@ -758,7 +736,7 @@ Include all four sections even if data is sparse. End the note with this exact d
 **IMPORTANT NOTICE:** This draft was generated from the documented patient record by AI and is provided for the treating doctor's review only. The doctor must verify all information, make necessary edits, and confirm the note before it enters the medical record. Do not use without review.
 
 followUp (structured follow-up summary for doctor confirmation):
-## Patient Profile, ## Documented Diagnoses, ## Current Treatment as Documented, ## Documented Clinical Changes Since Previous Visit, ## Pending Investigations, ## Recent Clinical Context, ## Follow-up Plan as Documented. End with:
+Include ONLY these three sections, in this order, each as "## Heading" followed by "- " bullets: ## Current Treatment as Documented, ## Pending Investigations, ## Follow-up Plan as Documented. End with:
 **IMPORTANT NOTICE:** This summary was generated from documented clinical records by AI and requires review and confirmation by the treating doctor before use.
 
 differentialDiagnosis (possible diagnostic considerations for the doctor's own review — apply these instructions in full and exactly as written; this section carries a stricter, independently field-validated format, so do not condense or paraphrase them):
